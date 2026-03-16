@@ -1,6 +1,16 @@
 import React, { useMemo } from "react";
-import { Modal, View, Text, StyleSheet, type ViewStyle } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from "react-native";
 import { useTheme } from "../contexts/ThemeContext";
+import type { ThemeColors } from "../theme/colors";
 
 interface BottomSheetModalProps {
   visible: boolean;
@@ -28,16 +38,28 @@ export default function BottomSheetModal({
       onRequestClose={onRequestClose}
     >
       <View style={styles.overlay}>
-        <View style={[styles.content, contentStyle]}>
-          <Text style={styles.title}>{title}</Text>
-          {children}
-        </View>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.keyboardContainer}
+        >
+          <View style={[styles.content, contentStyle]}>
+            <Text style={styles.title}>{title}</Text>
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {children}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
 }
 
-const useStyles = (colors) =>
+const useStyles = (colors: ThemeColors) =>
   useMemo(
     () =>
       StyleSheet.create({
@@ -46,12 +68,21 @@ const useStyles = (colors) =>
           backgroundColor: "rgba(0,0,0,0.5)",
           justifyContent: "flex-end",
         },
+        keyboardContainer: {
+          width: "100%",
+        },
         content: {
           backgroundColor: colors.card,
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,
           padding: 24,
           paddingBottom: 40,
+        },
+        scrollView: {
+          flexGrow: 0,
+        },
+        scrollContent: {
+          paddingBottom: 8,
         },
         title: {
           fontSize: 20,

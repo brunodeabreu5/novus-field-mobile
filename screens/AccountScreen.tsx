@@ -7,17 +7,32 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Switch,
 } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { useDevicePermissions } from "../contexts/DevicePermissionsContext";
 import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
+import { useTrackingStatus } from "../providers/TrackingProvider";
 import { colors } from "../theme/colors";
 
 export default function AccountScreen() {
-  const { user, profile, signOut, updateProfile } = useAuth();
+  const {
+    user,
+    profile,
+    signOut,
+    updateProfile,
+    biometricAvailable,
+    biometricEnrolled,
+    biometricEnabled,
+    biometricLabel,
+    biometricUnlocking,
+    enableBiometrics,
+    disableBiometrics,
+  } = useAuth();
   const {
     locationPermission,
+    backgroundLocationPermission,
     notificationPermission,
     expoPushToken,
     lastLocation,
@@ -29,6 +44,7 @@ export default function AccountScreen() {
     requestLocationPermission,
     requestNotificationPermission,
   } = useDevicePermissions();
+  const { trackingState, trackingError } = useTrackingStatus();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fullName, setFullName] = useState(profile?.full_name || "");
@@ -67,6 +83,45 @@ export default function AccountScreen() {
       },
     ]);
   };
+
+  const handleBiometricToggle = async (value: boolean) => {
+    if (value) {
+      const enabled = await enableBiometrics();
+
+      if (!enabled) {
+        Alert.alert(
+          "Biometria no disponible",
+          biometricAvailable
+            ? "Configure la biometria del dispositivo y vuelva a intentarlo."
+            : "Este dispositivo no admite autenticacion biometrica."
+        );
+      }
+
+      return;
+    }
+
+    await disableBiometrics();
+  };
+
+  const trackingStatusLabel =
+    trackingState === "background"
+      ? "Activo en background"
+      : trackingState === "foreground_only"
+        ? "Activo solo con la app abierta"
+        : trackingState === "denied"
+          ? "Permiso denegado"
+          : trackingState === "error"
+            ? "Error de rastreo"
+            : "No aplica";
+
+  const trackingStatusStyle =
+    trackingState === "background"
+      ? styles.testValueSuccess
+      : trackingState === "foreground_only"
+        ? styles.testValueWarning
+        : trackingState === "denied" || trackingState === "error"
+          ? styles.testError
+          : styles.testValue;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -132,6 +187,29 @@ export default function AccountScreen() {
       )}
 
       <View style={styles.testSection}>
+        <Text style={styles.testSectionTitle}>Seguridad</Text>
+
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingTitle}>Autenticacion biometrica</Text>
+            <Text style={styles.settingDesc}>
+              {biometricAvailable
+                ? biometricEnrolled
+                  ? `Use ${biometricLabel} para desbloquear la sesion guardada en este dispositivo.`
+                  : "Configure la biometria del dispositivo para activar esta opcion."
+                : "Este dispositivo no admite autenticacion biometrica."}
+            </Text>
+          </View>
+          <Switch
+            value={biometricEnabled}
+            onValueChange={handleBiometricToggle}
+            disabled={!biometricAvailable || !biometricEnrolled || biometricUnlocking}
+            trackColor={{ false: colors.border, true: colors.primary }}
+          />
+        </View>
+      </View>
+
+      <View style={styles.testSection}>
         <Text style={styles.testSectionTitle}>Dispositivo</Text>
 
         <View style={styles.testCard}>
@@ -169,6 +247,52 @@ export default function AccountScreen() {
               </TouchableOpacity>
             </>
           )}
+        </View>
+
+        <View style={styles.testCard}>
+          <Text style={styles.testLabel}>GPS en background</Text>
+          <Text
+            style={
+              backgroundLocationPermission === "granted"
+                ? [styles.testValue, styles.testValueSuccess]
+                : backgroundLocationPermission === "denied"
+                  ? styles.testError
+                  : styles.testValue
+            }
+          >
+            {backgroundLocationPermission === "granted"
+              ? "Autorizado"
+              : backgroundLocationPermission === "denied"
+                ? "Negado"
+                : "Pendente"}
+          </Text>
+          {backgroundLocationPermission !== "granted" ? (
+            <Text style={styles.testSubtext}>
+              Sin este permiso, el historial solo se completa cuando la app esta
+              abierta.
+            </Text>
+          ) : (
+            <Text style={styles.testSubtext}>
+              Para el rastreo mas estable posible, deje la app autorizada en
+              segundo plano y evite cerrarla a la fuerza.
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.testCard}>
+          <Text style={styles.testLabel}>Estado del rastreo</Text>
+          <Text style={[styles.testValue, trackingStatusStyle]}>
+            {trackingStatusLabel}
+          </Text>
+          {trackingState === "foreground_only" ? (
+            <Text style={styles.testSubtext}>
+              El rastreo sigue activo, pero fuera del primer plano puede faltar
+              parte del recorrido.
+            </Text>
+          ) : null}
+          {trackingError ? (
+            <Text style={styles.testSubtext}>{trackingError}</Text>
+          ) : null}
         </View>
 
         <View style={styles.testCard}>
@@ -285,6 +409,31 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  settingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 16,
+  },
+  settingInfo: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  settingTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.foreground,
+    marginBottom: 4,
+  },
+  settingDesc: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.mutedForeground,
+  },
   testSectionTitle: {
     fontSize: 14,
     fontWeight: "600",
@@ -307,6 +456,7 @@ const styles = StyleSheet.create({
   },
   testValue: { fontSize: 14, color: colors.mutedForeground },
   testValueSuccess: { color: colors.accent },
+  testValueWarning: { color: colors.warning },
   testError: { fontSize: 14, color: colors.destructive, marginBottom: 8 },
   testSubtext: {
     fontSize: 12,

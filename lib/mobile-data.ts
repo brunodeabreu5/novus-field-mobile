@@ -5,5 +5,6 @@ export * from "./data/clients-data";
 export * from "./data/charges-data";
 export * from "./data/chat-data";
 export * from "./data/manager-data";
+export * from "./data/visit-types-data";
 export * from "./offline-storage";
 export * from "./sync";

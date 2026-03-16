@@ -12,6 +12,22 @@ import {
   type VisitCreateAction,
 } from "./offline-storage";
 
+async function fetchDefaultVisitTypeName() {
+  const { data, error } = await supabase
+    .from("visit_type_options")
+    .select("name")
+    .eq("active", true)
+    .eq("is_default", true)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[Sync] Failed to load default visit type:", error.message);
+    return "Comercial";
+  }
+
+  return data?.name || "Comercial";
+}
+
 export async function syncQueuedActions(): Promise<number> {
   const queue = await offlineStorage.getQueue();
   if (queue.length === 0) return 0;
@@ -153,6 +169,8 @@ async function syncCheckIn(action: CheckInAction): Promise<boolean> {
     return true;
   }
 
+  const defaultVisitType = await fetchDefaultVisitTypeName();
+
   const { error } = await supabase.from("visits").insert({
     id: payload.visitId,
     vendor_id: payload.vendorId,
@@ -163,7 +181,7 @@ async function syncCheckIn(action: CheckInAction): Promise<boolean> {
     check_in_lat: payload.position.lat,
     check_in_lng: payload.position.lng,
     auto_checked_in: true,
-    visit_type: "visita_comercial",
+    visit_type: defaultVisitType,
   });
 
   if (error) {
@@ -206,6 +224,8 @@ async function syncVisitCreate(action: VisitCreateAction): Promise<boolean> {
     return true;
   }
 
+  const defaultVisitType = await fetchDefaultVisitTypeName();
+
   const { error } = await supabase.from("visits").insert({
     id: payload.visitId,
     vendor_id: payload.vendorId,
@@ -216,7 +236,7 @@ async function syncVisitCreate(action: VisitCreateAction): Promise<boolean> {
     check_in_lat: payload.position.lat,
     check_in_lng: payload.position.lng,
     auto_checked_in: true,
-    visit_type: "visita_comercial",
+    visit_type: defaultVisitType,
   });
 
   if (error) {
@@ -264,10 +284,13 @@ async function syncClientCreate(action: ClientCreateAction): Promise<boolean> {
     id: payload.clientId,
     created_by: payload.userId,
     name: payload.name,
+    document: payload.document,
     phone: payload.phone,
     email: payload.email,
     address: payload.address,
     notes: payload.notes,
+    latitude: payload.latitude,
+    longitude: payload.longitude,
   });
 
   if (error) {

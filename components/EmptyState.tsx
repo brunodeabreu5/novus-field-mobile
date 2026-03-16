@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { useTheme } from "../contexts/ThemeContext";
+import type { ThemeColors } from "../theme/colors";
 
 type EmptyStateProps = {
   title: string;
@@ -32,7 +33,7 @@ export default function EmptyState({
   );
 }
 
-const useStyles = (colors) =>
+const useStyles = (colors: ThemeColors) =>
   useMemo(
     () =>
       StyleSheet.create({

@@ -43,7 +43,7 @@ export interface ManualVisitCreatePayload {
   clientId: string | null;
   clientName: string;
   notes: string | null;
-  visitType: Visit["visit_type"] | null;
+  visitType: string | null;
   timestamp: string;
 }
 
@@ -51,10 +51,13 @@ export interface ClientCreatePayload {
   clientId: string;
   userId: string;
   name: string;
+  document: string | null;
   phone: string | null;
   email: string | null;
   address: string | null;
   notes: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface ChargeCreatePayload {

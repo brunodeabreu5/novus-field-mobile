@@ -13,11 +13,11 @@ import { colors } from "../theme/colors";
 import { spacing, fontSize, radius } from "../theme/spacing";
 
 const VISIT_TYPE_LABELS: Record<string, string> = {
-  venda: "Venta",
-  cobranca: "Cobranza",
-  prospeccao: "Prospeccion",
-  atendimiento: "Atendimiento",
-  visita_comercial: "Comercial",
+  Venta: "Venta",
+  Cobranza: "Cobranza",
+  Prospección: "Prospección",
+  Atención: "Atención",
+  Comercial: "Comercial",
 };
 
 export default function DashboardScreen() {

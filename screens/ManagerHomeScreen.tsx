@@ -8,7 +8,7 @@ import { colors } from "../theme/colors";
 const CARDS = [
   {
     title: "Mapa",
-    description: "Ver ubicaciones de vendedores",
+    description: "Ver ubicaciones y replay historico de vendedores",
     route: "Map",
   },
   {

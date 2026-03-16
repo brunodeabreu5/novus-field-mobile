@@ -22,6 +22,8 @@ export const lightColors = {
   accentForeground: "#ffffff",
 };
 
+export type ThemeColors = typeof lightColors;
+
 export const darkColors = {
   primary: "#3b82f6", // A brighter blue for dark mode
   primaryForeground: "#ffffff",

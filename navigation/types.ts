@@ -5,7 +5,7 @@ export type MainTabParamList = {
   Visits: undefined;
   Clients: undefined;
   Charges: undefined;
-  Chat: undefined;
+  Chat: { contactId?: string } | undefined;
   Manager: NavigatorScreenParams<ManagerStackParamList> | undefined;
   Account: undefined;
 };

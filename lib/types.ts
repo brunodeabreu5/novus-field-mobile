@@ -104,6 +104,7 @@ export type Database = {
           message: string
           read: boolean
           receiver_id: string
+          reply_to_id: string | null
           sender_id: string
         }
         Insert: {
@@ -112,6 +113,7 @@ export type Database = {
           message: string
           read?: boolean
           receiver_id: string
+          reply_to_id?: string | null
           sender_id: string
         }
         Update: {
@@ -120,7 +122,65 @@ export type Database = {
           message?: string
           read?: boolean
           receiver_id?: string
+          reply_to_id?: string | null
           sender_id?: string
+        }
+        Relationships: []
+      }
+      chat_attachments: {
+        Row: {
+          attachment_kind: string
+          created_at: string
+          duration_seconds: number | null
+          file_name: string
+          file_size_bytes: number | null
+          id: string
+          message_id: string
+          mime_type: string | null
+          storage_path: string
+          uploaded_by: string
+        }
+        Insert: {
+          attachment_kind: string
+          created_at?: string
+          duration_seconds?: number | null
+          file_name: string
+          file_size_bytes?: number | null
+          id?: string
+          message_id: string
+          mime_type?: string | null
+          storage_path: string
+          uploaded_by: string
+        }
+        Update: {
+          attachment_kind?: string
+          created_at?: string
+          duration_seconds?: number | null
+          file_name?: string
+          file_size_bytes?: number | null
+          id?: string
+          message_id?: string
+          mime_type?: string | null
+          storage_path?: string
+          uploaded_by?: string
+        }
+        Relationships: []
+      }
+      chat_presence: {
+        Row: {
+          last_seen_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          last_seen_at?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          last_seen_at?: string
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -184,6 +244,7 @@ export type Database = {
           assigned_vendor_id: string | null
           created_at: string
           created_by: string
+          document: string | null
           email: string | null
           id: string
           latitude: number | null
@@ -198,6 +259,7 @@ export type Database = {
           assigned_vendor_id?: string | null
           created_at?: string
           created_by: string
+          document?: string | null
           email?: string | null
           id?: string
           latitude?: number | null
@@ -212,6 +274,7 @@ export type Database = {
           assigned_vendor_id?: string | null
           created_at?: string
           created_by?: string
+          document?: string | null
           email?: string | null
           id?: string
           latitude?: number | null
@@ -505,6 +568,33 @@ export type Database = {
         }
         Relationships: []
       }
+      vendor_tracking_status: {
+        Row: {
+          last_error: string | null
+          last_heartbeat_at: string
+          last_position_at: string | null
+          tracking_mode: string | null
+          updated_at: string
+          vendor_id: string
+        }
+        Insert: {
+          last_error?: string | null
+          last_heartbeat_at?: string
+          last_position_at?: string | null
+          tracking_mode?: string | null
+          updated_at?: string
+          vendor_id: string
+        }
+        Update: {
+          last_error?: string | null
+          last_heartbeat_at?: string
+          last_position_at?: string | null
+          tracking_mode?: string | null
+          updated_at?: string
+          vendor_id?: string
+        }
+        Relationships: []
+      }
       visit_settings: {
         Row: {
           count_from_minutes: number
@@ -535,6 +625,42 @@ export type Database = {
         }
         Relationships: []
       }
+      visit_type_options: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          is_default: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_default?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       visits: {
         Row: {
           auto_checked_in: boolean | null
@@ -552,7 +678,7 @@ export type Database = {
           photos_count: number | null
           vendor_id: string
           vendor_name: string
-          visit_type: Database["public"]["Enums"]["visit_type"]
+          visit_type: string
         }
         Insert: {
           auto_checked_in?: boolean | null
@@ -570,7 +696,7 @@ export type Database = {
           photos_count?: number | null
           vendor_id: string
           vendor_name: string
-          visit_type?: Database["public"]["Enums"]["visit_type"]
+          visit_type?: string
         }
         Update: {
           auto_checked_in?: boolean | null
@@ -588,7 +714,7 @@ export type Database = {
           photos_count?: number | null
           vendor_id?: string
           vendor_name?: string
-          visit_type?: Database["public"]["Enums"]["visit_type"]
+          visit_type?: string
         }
         Relationships: [
           {

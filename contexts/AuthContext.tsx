@@ -1,8 +1,23 @@
-import React, { createContext, useContext, ReactNode } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { dismissProfilePromptStorage } from "../lib/auth-data";
 import { useAuthSession } from "../hooks/use-auth-session";
+import {
+  authenticateWithBiometrics,
+  getBiometricAvailability,
+  isBiometricEnabledForUser,
+  setBiometricEnabledForUser,
+} from "../lib/biometric-auth";
 
 export type AppRole = "admin" | "manager" | "vendor";
 
@@ -22,9 +37,19 @@ interface AuthContextType {
   role: AppRole | null;
   loading: boolean;
   profileIncomplete: boolean;
+  biometricAvailable: boolean;
+  biometricEnrolled: boolean;
+  biometricEnabled: boolean;
+  biometricLabel: string;
+  biometricLoading: boolean;
+  biometricUnlocking: boolean;
+  biometricRequired: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
+  enableBiometrics: () => Promise<boolean>;
+  disableBiometrics: () => Promise<void>;
+  unlockWithBiometrics: () => Promise<boolean>;
   updateProfile: (data: Partial<Profile>) => Promise<void>;
   dismissProfilePrompt: () => void;
   isAdmin: boolean;
@@ -46,10 +71,62 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     refreshProfile,
     setProfileIncomplete,
   } = useAuthSession();
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnrolled, setBiometricEnrolled] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricLabel, setBiometricLabel] = useState("biometria");
+  const [biometricLoading, setBiometricLoading] = useState(true);
+  const [biometricUnlocking, setBiometricUnlocking] = useState(false);
+  const [biometricUnlocked, setBiometricUnlocked] = useState(false);
+  const skipNextBiometricLockRef = useRef(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+
+  const syncBiometricState = useCallback(async (userId: string | null, hasSession: boolean) => {
+    setBiometricLoading(true);
+
+    try {
+      const availability = await getBiometricAvailability();
+      setBiometricAvailable(availability.available);
+      setBiometricEnrolled(availability.enrolled);
+      setBiometricLabel(availability.label);
+
+      if (!userId || !hasSession || !availability.available || !availability.enrolled) {
+        setBiometricEnabled(false);
+        setBiometricUnlocked(true);
+        return;
+      }
+
+      const enabled = await isBiometricEnabledForUser(userId);
+      setBiometricEnabled(enabled);
+
+      if (!enabled || skipNextBiometricLockRef.current) {
+        setBiometricUnlocked(true);
+        skipNextBiometricLockRef.current = false;
+        return;
+      }
+
+      setBiometricUnlocked(false);
+    } catch {
+      setBiometricAvailable(false);
+      setBiometricEnrolled(false);
+      setBiometricEnabled(false);
+      setBiometricLabel("biometria");
+      setBiometricUnlocked(true);
+    } finally {
+      setBiometricLoading(false);
+    }
+  }, []);
 
   const signIn = async (email: string, password: string) => {
+    skipNextBiometricLockRef.current = true;
+    setBiometricUnlocked(true);
+
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+
+    if (error) {
+      skipNextBiometricLockRef.current = false;
+      throw error;
+    }
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
@@ -65,7 +142,76 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
+    setBiometricUnlocked(false);
     if (error) throw error;
+  };
+
+  const enableBiometrics = async () => {
+    if (!user) {
+      return false;
+    }
+
+    setBiometricUnlocking(true);
+
+    try {
+      const availability = await getBiometricAvailability();
+      setBiometricAvailable(availability.available);
+      setBiometricEnrolled(availability.enrolled);
+      setBiometricLabel(availability.label);
+
+      if (!availability.available || !availability.enrolled) {
+        return false;
+      }
+
+      const authenticated = await authenticateWithBiometrics(
+        `Confirme su identidad para habilitar ${availability.label}`
+      );
+
+      if (!authenticated) {
+        return false;
+      }
+
+      await setBiometricEnabledForUser(user.id, true);
+      setBiometricEnabled(true);
+      setBiometricUnlocked(true);
+
+      return true;
+    } finally {
+      setBiometricUnlocking(false);
+    }
+  };
+
+  const disableBiometrics = async () => {
+    if (!user) {
+      return;
+    }
+
+    await setBiometricEnabledForUser(user.id, false);
+    setBiometricEnabled(false);
+    setBiometricUnlocked(true);
+  };
+
+  const unlockWithBiometrics = async () => {
+    if (!user) {
+      return false;
+    }
+
+    setBiometricUnlocking(true);
+
+    try {
+      const authenticated = await authenticateWithBiometrics(
+        `Desbloquee la aplicacion con ${biometricLabel}`
+      );
+
+      if (!authenticated) {
+        return false;
+      }
+
+      setBiometricUnlocked(true);
+      return true;
+    } finally {
+      setBiometricUnlocking(false);
+    }
   };
 
   const updateProfile = async (data: Partial<Profile>) => {
@@ -84,6 +230,29 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const isManager = role === "manager";
   const isVendor = role === "vendor";
   const isManagerOrAdmin = isAdmin || isManager;
+  const biometricRequired = !!session && biometricEnabled && !biometricUnlocked;
+
+  useEffect(() => {
+    void syncBiometricState(user?.id ?? null, !!session);
+  }, [session, syncBiometricState, user?.id]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      const prevAppState = appStateRef.current;
+      appStateRef.current = nextAppState;
+
+      if (
+        (prevAppState === "active" || prevAppState === "inactive") &&
+        nextAppState === "background" &&
+        biometricEnabled &&
+        session
+      ) {
+        setBiometricUnlocked(false);
+      }
+    });
+
+    return () => subscription.remove();
+  }, [biometricEnabled, session]);
 
   return (
     <AuthContext.Provider
@@ -94,9 +263,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         role,
         loading,
         profileIncomplete,
+        biometricAvailable,
+        biometricEnrolled,
+        biometricEnabled,
+        biometricLabel,
+        biometricLoading,
+        biometricUnlocking,
+        biometricRequired,
         signIn,
         signUp,
         signOut,
+        enableBiometrics,
+        disableBiometrics,
+        unlockWithBiometrics,
         updateProfile,
         dismissProfilePrompt,
         isAdmin,

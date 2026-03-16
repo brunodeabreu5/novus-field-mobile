@@ -3,15 +3,19 @@ import {
   fetchContacts,
   fetchMessages,
   markConversationAsRead,
+  openChatAttachment,
   sendChatMessage,
   type ChatMessage,
+  toggleChatReaction,
 } from "../../lib/mobile-data";
 import { mobileQueryKeys } from "./query-keys";
 
-export function useContactsData(userId?: string) {
+export function useContactsData(userId?: string, canSeePresence = false) {
   return useQuery({
-    queryKey: userId ? mobileQueryKeys.contacts(userId) : ["contacts", "anonymous"],
-    queryFn: () => fetchContacts(userId!),
+    queryKey: userId
+      ? [...mobileQueryKeys.contacts(userId), canSeePresence]
+      : ["contacts", "anonymous", canSeePresence],
+    queryFn: () => fetchContacts(userId!, canSeePresence),
     enabled: !!userId,
   });
 }
@@ -45,6 +49,9 @@ export function useSendChatMessage() {
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.contacts(message.sender_id),
       });
+      queryClient.invalidateQueries({
+        queryKey: mobileQueryKeys.contacts(message.receiver_id),
+      });
     },
   });
 }
@@ -68,5 +75,27 @@ export function useMarkConversationAsRead() {
         queryKey: mobileQueryKeys.messages(variables.userId, variables.otherUserId),
       });
     },
+  });
+}
+
+export function useToggleChatReaction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: toggleChatReaction,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["messages"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["contacts"],
+      });
+    },
+  });
+}
+
+export function useOpenChatAttachment() {
+  return useMutation({
+    mutationFn: openChatAttachment,
   });
 }

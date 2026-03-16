@@ -8,12 +8,17 @@ import {
   ActivityIndicator,
   TextInput,
   Alert,
+  ScrollView,
 } from "react-native";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
-import { useCreateVisit, useVisitsData } from "../hooks/use-mobile-data";
-import type { VisitPeriod } from "../lib/mobile-data";
+import {
+  useCreateVisit,
+  useVisitTypeOptionsData,
+  useVisitsData,
+} from "../hooks/use-mobile-data";
+import type { VisitPeriod, VisitTypeOption } from "../lib/mobile-data";
 import type { Tables } from "../lib/types";
 import BottomSheetModal from "../components/BottomSheetModal";
 import FormActions from "../components/FormActions";
@@ -22,42 +27,33 @@ import { colors } from "../theme/colors";
 
 type Visit = Tables<"visits">;
 
-const VISIT_TYPE_LABELS: Record<string, string> = {
-  venda: "Venta",
-  cobranca: "Cobranza",
-  prospeccao: "Prospeccion",
-  atendimento: "Atendimiento",
-  visita_comercial: "Comercial",
-};
-
-const VISIT_TYPES = [
-  "visita_comercial",
-  "venda",
-  "cobranca",
-  "prospeccao",
-  "atendimento",
-] as const;
+const getDefaultVisitType = (types: VisitTypeOption[]) =>
+  types.find((item) => item.is_default)?.name || types[0]?.name || "Comercial";
 
 export default function VisitsScreen() {
   const { user, profile } = useAuth();
   const [modalVisible, setModalVisible] = useState(false);
+  const [typePickerVisible, setTypePickerVisible] = useState(false);
   const [period, setPeriod] = useState<VisitPeriod>("week");
   const [form, setForm] = useState({
     clientId: "",
     clientName: "",
     notes: "",
-    visitType: "visita_comercial" as (typeof VISIT_TYPES)[number],
+    visitType: "Comercial",
   });
 
   const { data: visits = [], isLoading } = useVisitsData(user?.id, period);
+  const { data: visitTypes = [], isLoading: isLoadingVisitTypes } =
+    useVisitTypeOptionsData();
   const createVisitMutation = useCreateVisit();
 
   const openModal = () => {
+    const defaultVisitType = getDefaultVisitType(visitTypes);
     setForm({
       clientId: "",
       clientName: "",
       notes: "",
-      visitType: "visita_comercial",
+      visitType: defaultVisitType,
     });
     setModalVisible(true);
   };
@@ -65,6 +61,11 @@ export default function VisitsScreen() {
   const handleCreateVisit = async () => {
     if (!user || !profile || !form.clientName.trim()) {
       Alert.alert("Error", "Ingrese el nombre del cliente");
+      return;
+    }
+
+    if (!form.visitType.trim()) {
+      Alert.alert("Error", "Seleccione un tipo de visita");
       return;
     }
 
@@ -107,7 +108,7 @@ export default function VisitsScreen() {
         </View>
       </View>
       <Text style={styles.visitMeta}>
-        {VISIT_TYPE_LABELS[item.visit_type] || item.visit_type} •{" "}
+        {item.visit_type} •{" "}
         {format(new Date(item.check_in_at), "dd MMM HH:mm", { locale: es })}
       </Text>
     </View>
@@ -177,29 +178,22 @@ export default function VisitsScreen() {
         />
 
         <Text style={styles.label}>Tipo</Text>
-        <View style={styles.typeRow}>
-          {VISIT_TYPES.map((type) => (
-            <TouchableOpacity
-              key={type}
-              style={[
-                styles.typeChip,
-                form.visitType === type && styles.typeChipActive,
-              ]}
-              onPress={() =>
-                setForm((current) => ({ ...current, visitType: type }))
-              }
-            >
-              <Text
-                style={[
-                  styles.typeChipText,
-                  form.visitType === type && styles.typeChipTextActive,
-                ]}
-              >
-                {VISIT_TYPE_LABELS[type]}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <TouchableOpacity
+          style={styles.selector}
+          onPress={() => setTypePickerVisible(true)}
+          disabled={isLoadingVisitTypes}
+        >
+          <Text
+            style={[
+              styles.selectorText,
+              !form.visitType && styles.selectorPlaceholder,
+            ]}
+          >
+            {isLoadingVisitTypes
+              ? "Cargando tipos..."
+              : form.visitType || "Seleccione un tipo"}
+          </Text>
+        </TouchableOpacity>
 
         <FormField
           label="Notas (opcional)"
@@ -217,6 +211,43 @@ export default function VisitsScreen() {
           onCancel={() => setModalVisible(false)}
           onSubmit={handleCreateVisit}
         />
+      </BottomSheetModal>
+
+      <BottomSheetModal
+        visible={typePickerVisible}
+        title="Seleccionar Tipo"
+        onRequestClose={() => setTypePickerVisible(false)}
+        contentStyle={styles.modal}
+      >
+        <ScrollView>
+          {visitTypes.map((type) => (
+            <TouchableOpacity
+              key={type.id}
+              style={[
+                styles.typeOption,
+                form.visitType === type.name && styles.typeOptionActive,
+              ]}
+              onPress={() => {
+                setForm((current) => ({ ...current, visitType: type.name }));
+                setTypePickerVisible(false);
+              }}
+            >
+              <Text
+                style={[
+                  styles.typeOptionText,
+                  form.visitType === type.name && styles.typeOptionTextActive,
+                ]}
+              >
+                {type.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+          {!visitTypes.length ? (
+            <Text style={styles.emptyTypes}>
+              No hay tipos de visita activos configurados.
+            </Text>
+          ) : null}
+        </ScrollView>
       </BottomSheetModal>
     </View>
   );
@@ -275,15 +306,28 @@ const styles = StyleSheet.create({
   modal: {
   },
   label: { fontSize: 14, fontWeight: "500", marginBottom: 8 },
-  typeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 },
-  typeChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+  selector: {
     borderWidth: 1,
     borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 16,
+    backgroundColor: colors.card,
   },
-  typeChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  typeChipText: { fontSize: 12, color: colors.mutedForeground },
-  typeChipTextActive: { color: "#fff", fontWeight: "600" },
+  selectorText: { fontSize: 14, color: colors.foreground },
+  selectorPlaceholder: { color: colors.mutedForeground },
+  typeOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    marginBottom: 10,
+  },
+  typeOptionActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  typeOptionText: { fontSize: 14, color: colors.foreground, fontWeight: "600" },
+  typeOptionTextActive: { color: "#fff" },
+  emptyTypes: { textAlign: "center", color: colors.mutedForeground, marginTop: 12 },
 });

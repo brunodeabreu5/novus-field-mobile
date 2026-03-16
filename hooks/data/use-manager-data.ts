@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAlerts,
+  fetchVendorRouteHistory,
   fetchLatestVendorPositions,
   fetchVendorProfiles,
 } from '../../lib/mobile-data';
@@ -16,24 +17,41 @@ export function useAlertsData(userId?: string) {
   });
 }
 
-export function useVendorPositions() {
+export function useVendorPositions(enabled = true) {
   return useQuery({
     queryKey: mobileQueryKeys.map,
     queryFn: fetchLatestVendorPositions,
+    enabled,
   });
 }
 
-export function useVendorsData() {
+export function useVendorRouteHistory(vendorId?: string, date?: string) {
+  return useQuery({
+    queryKey:
+      vendorId && date
+        ? mobileQueryKeys.vendorHistory(vendorId, date)
+        : ["vendor-history", "idle"],
+    queryFn: () => fetchVendorRouteHistory(vendorId!, date!),
+    enabled: !!vendorId && !!date,
+  });
+}
+
+export function useVendorsData(enabled = true) {
   return useQuery({
     queryKey: mobileQueryKeys.vendors,
     queryFn: fetchVendorProfiles,
+    enabled,
   });
 }
 
-export function useVendorPositionsSubscription() {
+export function useVendorPositionsSubscription(enabled = true) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const channel = supabase
       .channel('vendor_positions')
       .on(
@@ -45,6 +63,7 @@ export function useVendorPositionsSubscription() {
         },
         () => {
           queryClient.invalidateQueries({ queryKey: mobileQueryKeys.map });
+          queryClient.invalidateQueries({ queryKey: ["vendor-history"] });
         },
       )
       .subscribe();
@@ -52,5 +71,5 @@ export function useVendorPositionsSubscription() {
     return () => {
       channel.unsubscribe();
     };
-  }, [queryClient]);
+  }, [enabled, queryClient]);
 }

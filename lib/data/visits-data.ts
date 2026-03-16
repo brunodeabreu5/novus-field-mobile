@@ -4,7 +4,7 @@ import { supabase } from "../supabase";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
-import type { Visit, VisitPeriod, VisitType } from "./types";
+import type { Visit, VisitPeriod } from "./types";
 
 export async function fetchVisits(userId: string, period: VisitPeriod): Promise<Visit[]> {
   const from =
@@ -35,7 +35,7 @@ export async function createVisit(input: {
   clientId: string;
   clientName: string;
   notes: string;
-  visitType: VisitType;
+  visitType: string;
 }) {
   const visit: Visit = {
     id: generateId(),

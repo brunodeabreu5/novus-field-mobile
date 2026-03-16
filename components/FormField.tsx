@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { Text, TextInput, StyleSheet, type TextInputProps } from "react-native";
 import { useTheme } from "../contexts/ThemeContext";
+import type { ThemeColors } from "../theme/colors";
 
 interface FormFieldProps extends TextInputProps {
   label: string;
@@ -29,7 +30,7 @@ export default function FormField({
   );
 }
 
-const useStyles = (colors) =>
+const useStyles = (colors: ThemeColors) =>
   useMemo(
     () =>
       StyleSheet.create({

@@ -7,6 +7,7 @@ import {
 
 interface DevicePermissionsContextValue {
   locationPermission: PermissionState;
+  backgroundLocationPermission: PermissionState;
   notificationPermission: PermissionState;
   expoPushToken: string | null;
   lastLocation: { lat: number; lng: number } | null;

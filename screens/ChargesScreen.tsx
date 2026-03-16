@@ -24,6 +24,7 @@ import {
   useClientsData,
 } from "../hooks/use-mobile-data";
 import type { Charge, Client } from "../lib/mobile-data";
+import type { ThemeColors } from "../theme/colors";
 
 const STATUS_LABELS: Record<string, string> = {
   pendiente: "Pendiente",
@@ -75,7 +76,7 @@ export default function ChargesScreen() {
   const styles = useStyles(colors);
   const { user, profile } = useAuth();
   const { data: charges = [], isLoading } = useChargesData(user?.id);
-  const { data: clients = [] } = useClientsData(user?.id);
+  const { data: clients = [] } = useClientsData();
   const createChargeMutation = useCreateCharge();
   const [modalVisible, setModalVisible] = useState(false);
   const [clientPickerVisible, setClientPickerVisible] = useState(false);
@@ -293,7 +294,7 @@ export default function ChargesScreen() {
   );
 }
 
-const useStyles = (colors) =>
+const useStyles = (colors: ThemeColors) =>
   useMemo(
     () =>
       StyleSheet.create({

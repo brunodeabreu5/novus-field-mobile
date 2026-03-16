@@ -6,6 +6,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { DevicePermissionsProvider } from "./contexts/DevicePermissionsContext";
 import { MenuProvider } from "./contexts/MenuContext";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
+import { ChatPresenceProvider } from "./providers/ChatPresenceProvider";
 import { TrackingProvider } from "./providers/TrackingProvider";
 import RootNavigator from "./navigation/RootNavigator";
 
@@ -29,9 +30,11 @@ export default function App() {
           <DevicePermissionsProvider>
             <MenuProvider>
               <TrackingProvider>
-                <ThemeProvider>
-                  <ThemedApp />
-                </ThemeProvider>
+                <ChatPresenceProvider>
+                  <ThemeProvider>
+                    <ThemedApp />
+                  </ThemeProvider>
+                </ChatPresenceProvider>
               </TrackingProvider>
             </MenuProvider>
           </DevicePermissionsProvider>

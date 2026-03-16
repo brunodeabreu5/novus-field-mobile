@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useTheme } from "../contexts/ThemeContext";
+import type { ThemeColors } from "../theme/colors";
 
 interface FormActionsProps {
   isLoading?: boolean;
@@ -46,7 +47,7 @@ export default function FormActions({
   );
 }
 
-const useStyles = (colors) =>
+const useStyles = (colors: ThemeColors) =>
   useMemo(
     () =>
       StyleSheet.create({

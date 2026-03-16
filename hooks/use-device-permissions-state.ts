@@ -48,6 +48,8 @@ export function useDevicePermissionsState(sessionActive: boolean) {
   const [locationPermission, setLocationPermission] = useState<PermissionState>(
     isWeb ? "unsupported" : "unknown"
   );
+  const [backgroundLocationPermission, setBackgroundLocationPermission] =
+    useState<PermissionState>(isWeb ? "unsupported" : "unknown");
   const [notificationPermission, setNotificationPermission] =
     useState<PermissionState>(isWeb || isExpoGo ? "unsupported" : "unknown");
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
@@ -102,6 +104,10 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       const nextLocationPermission = mapPermissionStatus(locationStatus);
       setLocationPermission(nextLocationPermission);
 
+      const { status: backgroundLocationStatus } =
+        await Location.getBackgroundPermissionsAsync();
+      setBackgroundLocationPermission(mapPermissionStatus(backgroundLocationStatus));
+
       if (nextLocationPermission === "granted") {
         await loadCurrentLocation();
       } else {
@@ -137,7 +143,9 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       setLocationPermission(nextPermission);
       if (nextPermission === "granted") {
         if (!isExpoGo) {
-          await Location.requestBackgroundPermissionsAsync();
+          const { status: backgroundStatus } =
+            await Location.requestBackgroundPermissionsAsync();
+          setBackgroundLocationPermission(mapPermissionStatus(backgroundStatus));
         }
         await loadCurrentLocation();
       } else {
@@ -214,6 +222,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
   return useMemo(
     () => ({
       locationPermission,
+      backgroundLocationPermission,
       notificationPermission,
       expoPushToken,
       lastLocation,
@@ -231,6 +240,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       lastError,
       lastLocation,
       locationPermission,
+      backgroundLocationPermission,
       notificationPermission,
       refreshPermissions,
       requestLocationPermission,
