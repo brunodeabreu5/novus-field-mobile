@@ -18,10 +18,14 @@ import {
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Sharing from "expo-sharing";
+import { io, type Socket } from "socket.io-client";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { format } from "date-fns";
 import { useAuth } from "../contexts/AuthContext";
+import {
+  getAccessToken,
+} from "../lib/backend-auth";
 import {
   useContactsData,
   useMarkConversationAsRead,
@@ -29,9 +33,10 @@ import {
   useOpenChatAttachment,
   useSendChatMessage,
   useToggleChatReaction,
+  useUpdateChatPresence,
 } from "../hooks/use-mobile-data";
 import type { ChatAttachment, ChatMessage, Contact, DraftChatAttachment } from "../lib/mobile-data";
-import { supabase } from "../lib/supabase";
+import { resolveBackendWsUrl } from "../lib/config";
 import type { MainTabParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
 
@@ -108,6 +113,7 @@ export default function ChatScreen() {
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
   const soundRef = useRef<SoundHandle | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   const {
     data: contacts = [],
@@ -123,6 +129,7 @@ export default function ChatScreen() {
   const markConversationAsReadMutation = useMarkConversationAsRead();
   const toggleReactionMutation = useToggleChatReaction();
   const openChatAttachmentMutation = useOpenChatAttachment();
+  const updateChatPresenceMutation = useUpdateChatPresence();
 
   const filteredContacts = useMemo(() => {
     if (!contactSearch.trim()) {
@@ -190,31 +197,66 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!user) return;
 
-    const channel = supabase
-      .channel(`mobile-chat-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, () => {
+    updateChatPresenceMutation.mutate({ userId: user.id });
+    const interval = setInterval(() => {
+      updateChatPresenceMutation.mutate({ userId: user.id });
+      refetchContacts();
+      if (selectedContact) {
+        refetchMessages();
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [refetchContacts, refetchMessages, selectedContact, updateChatPresenceMutation, user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    const connect = async () => {
+      const token = await getAccessToken();
+      if (!token || cancelled) return;
+
+      const socket = io(`${resolveBackendWsUrl()}/chat`, {
+        auth: { token },
+        transports: ["websocket"],
+      });
+      socketRef.current = socket;
+
+      socket.on("chat:message", (payload: Record<string, unknown>) => {
+        const senderId = typeof payload.sender_id === "string" ? payload.sender_id : null;
+        const receiverId = typeof payload.receiver_id === "string" ? payload.receiver_id : null;
+        if (selectedContact && (senderId === selectedContact.id || receiverId === selectedContact.id)) {
+          refetchMessages();
+        }
         refetchContacts();
+      });
+
+      socket.on("chat:read", () => {
         if (selectedContact) {
           refetchMessages();
         }
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_attachments" }, () => {
-        if (selectedContact) {
-          refetchMessages();
-        }
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_reactions" }, () => {
-        if (selectedContact) {
-          refetchMessages();
-        }
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_presence" }, () => {
         refetchContacts();
-      })
-      .subscribe();
+      });
+
+      socket.on("chat:reaction", () => {
+        if (selectedContact) {
+          refetchMessages();
+        }
+      });
+
+      socket.on("chat:presence", () => {
+        refetchContacts();
+      });
+    };
+
+    void connect();
 
     return () => {
-      channel.unsubscribe();
+      cancelled = true;
+      socketRef.current?.disconnect();
+      socketRef.current = null;
     };
   }, [refetchContacts, refetchMessages, selectedContact, user]);
 
@@ -450,6 +492,15 @@ export default function ChatScreen() {
         error instanceof Error ? error.message : "No se pudo enviar la mensagem."
       );
     }
+  };
+
+  const handleChangeMessage = (value: string) => {
+    setNewMessage(value);
+    if (!selectedContact || !socketRef.current) return;
+    socketRef.current.emit("chat:typing", {
+      toUserId: selectedContact.id,
+      isTyping: value.trim().length > 0,
+    });
   };
 
   const toggleReaction = async (messageId: string, emoji: string) => {
@@ -791,7 +842,7 @@ export default function ChatScreen() {
             style={styles.input}
             placeholder="Mensaje..."
             value={newMessage}
-            onChangeText={setNewMessage}
+            onChangeText={handleChangeMessage}
             placeholderTextColor={colors.mutedForeground}
             multiline
             maxLength={1000}

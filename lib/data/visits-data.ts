@@ -1,6 +1,6 @@
 import { endOfDay, startOfDay, startOfWeek } from "date-fns";
 import { es } from "date-fns/locale";
-import { supabase } from "../supabase";
+import { backendApi } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
@@ -13,20 +13,13 @@ export async function fetchVisits(userId: string, period: VisitPeriod): Promise<
       : startOfWeek(new Date(), { locale: es });
   const to = new Date();
 
-  const { data, error } = await supabase
-    .from("visits")
-    .select("*")
-    .eq("vendor_id", userId)
-    .gte("check_in_at", from.toISOString())
-    .lte("check_in_at", endOfDay(to).toISOString())
-    .order("check_in_at", { ascending: false })
-    .limit(200);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (data || []) as Visit[];
+  const params = new URLSearchParams({
+    vendorId: userId,
+    from: from.toISOString(),
+    to: endOfDay(to).toISOString(),
+    limit: "200",
+  });
+  return backendApi.get<Visit[]>(`/visits?${params.toString()}`);
 }
 
 export async function createVisit(input: {
@@ -48,9 +41,16 @@ export async function createVisit(input: {
     check_in_at: new Date().toISOString(),
   } as Visit;
 
-  const { error } = await supabase.from("visits").insert(visit);
-
-  if (error) {
+  try {
+    const created = await backendApi.post<Visit>("/visits", {
+      client_id: visit.client_id,
+      client_name: visit.client_name,
+      notes: visit.notes,
+      visit_type: visit.visit_type,
+      check_in_at: visit.check_in_at,
+    });
+    return { visit: created, queued: false as const };
+  } catch (error) {
     if (isOfflineLikeError(error)) {
       await offlineStorage.enqueue({
         type: "manual_visit_create",
@@ -67,8 +67,6 @@ export async function createVisit(input: {
       });
       return { visit, queued: true as const };
     }
-    throw new Error(error.message);
+    throw error;
   }
-
-  return { visit, queued: false as const };
 }

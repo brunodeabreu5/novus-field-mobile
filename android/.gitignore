@@ -1,16 +1,41 @@
-# OSX
-#
+# OS
 .DS_Store
 
-# Android/IntelliJ
-#
+# Android Studio / IntelliJ
 build/
-.idea
-.gradle
-local.properties
+.idea/
 *.iml
 *.hprof
+out/
+
+# Gradle
+.gradle/
+**/gradle-app.setting
+!gradle-app.setting
+
+# Local config (sdk path, etc.)
+local.properties
+
+# NDK / C++
 .cxx/
+*.so
 
 # Bundle artifacts
 *.jsbundle
+
+# Signing (nunca commitar)
+*.jks
+*.keystore
+key.properties
+upload-key.jks
+
+# Logs e relatórios de build
+**/build/reports/
+**/build/outputs/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Capturas de teste
+captures/

@@ -8,8 +8,6 @@ import React, {
   type ReactNode,
 } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import { Session, User } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase";
 import { dismissProfilePromptStorage } from "../lib/auth-data";
 import { useAuthSession } from "../hooks/use-auth-session";
 import {
@@ -18,6 +16,14 @@ import {
   isBiometricEnabledForUser,
   setBiometricEnabledForUser,
 } from "../lib/biometric-auth";
+import {
+  type AuthSession as Session,
+  type AuthUser as User,
+  signIn as backendSignIn,
+  signOut as backendSignOut,
+  signUp as backendSignUp,
+  updateProfileRequest,
+} from "../lib/backend-auth";
 
 export type AppRole = "admin" | "manager" | "vendor";
 
@@ -27,6 +33,7 @@ export interface Profile {
   avatar_url: string | null;
   phone: string | null;
   role_title: string | null;
+  document?: string | null;
   created_at: string | null;
 }
 
@@ -121,29 +128,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     skipNextBiometricLockRef.current = true;
     setBiometricUnlocked(true);
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
+    try {
+      await backendSignIn(email, password);
+    } catch (error) {
       skipNextBiometricLockRef.current = false;
       throw error;
     }
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName },
-      },
-    });
-    if (error) throw error;
+    await backendSignUp(email, password, fullName);
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
+    await backendSignOut();
     setBiometricUnlocked(false);
-    if (error) throw error;
   };
 
   const enableBiometrics = async () => {
@@ -164,7 +163,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const authenticated = await authenticateWithBiometrics(
-        `Confirme su identidad para habilitar ${availability.label}`
+        `Confirme su identidad para habilitar ${availability.label}`,
       );
 
       if (!authenticated) {
@@ -200,7 +199,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     try {
       const authenticated = await authenticateWithBiometrics(
-        `Desbloquee la aplicacion con ${biometricLabel}`
+        `Desbloquee la aplicacion con ${biometricLabel}`,
       );
 
       if (!authenticated) {
@@ -216,8 +215,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const updateProfile = async (data: Partial<Profile>) => {
     if (!user) return;
-    const { error } = await supabase.from("profiles").update(data).eq("id", user.id);
-    if (error) throw error;
+    await updateProfileRequest(data);
     await refreshProfile(user.id);
   };
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
-import { supabase } from "../lib/supabase";
+import { backendApi } from "../lib/backend-api";
 import { offlineStorage } from "../lib/offline-storage";
 import { isOfflineLikeError } from "../lib/sync";
 
@@ -49,21 +49,21 @@ async function publishTrackingHeartbeat(
     lastError?: string | null;
   }
 ) {
-  const { error } = await supabase.from("vendor_tracking_status").upsert(
-    {
-      vendor_id: vendorId,
-      tracking_mode: payload.trackingMode,
-      last_heartbeat_at: new Date().toISOString(),
-      last_position_at: payload.lastPositionAt ?? null,
-      last_error: payload.lastError ?? null,
-    },
-    { onConflict: "vendor_id" }
-  );
-
-  if (error && !isOfflineLikeError(error)) {
-    console.warn("[Tracking] Heartbeat update failed:", error.message);
-    return;
-  }
+  await backendApi.post("/tracking/status", {
+    vendor_id: vendorId,
+    tracking_mode: payload.trackingMode,
+    last_heartbeat_at: new Date().toISOString(),
+    last_position_at: payload.lastPositionAt ?? null,
+    last_error: payload.lastError ?? null,
+  }).catch((error) => {
+    if (!isOfflineLikeError(error)) {
+      console.warn(
+        "[Tracking] Heartbeat update failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+    return null;
+  });
 }
 
 async function persistPosition(
@@ -115,9 +115,19 @@ async function persistPosition(
     recorded_at: timestampIso,
   };
 
-  const { error } = await supabase.from("vendor_positions").insert(payload);
-
-  if (error) {
+  try {
+    await backendApi.post("/tracking/positions", {
+      vendor_id: vendorId,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      accuracy_meters: payload.accuracy_meters,
+      speed_kmh: payload.speed_kmh,
+      heading: payload.heading,
+      idle_duration_seconds: payload.idle_duration_seconds,
+      is_idle: payload.is_idle,
+      recorded_at: payload.recorded_at,
+    });
+  } catch (error) {
     if (isOfflineLikeError(error)) {
       await offlineStorage.enqueue({
         type: "vendor_position",
@@ -134,7 +144,7 @@ async function persistPosition(
       return;
     }
 
-    throw new Error(error.message);
+    throw new Error(error instanceof Error ? error.message : "Tracking persistence failed");
   }
 
   await AsyncStorage.setItem(

@@ -3,20 +3,33 @@ node_modules/
 
 # Environment (nunca commitar credenciais)
 .env
+.env.*
 .env.local
-.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
 
 # Expo
 .expo/
 dist/
 web-build/
+expo-env.d.ts
+
+# Metro / React Native
+.metro-health-check*
+metro-cache/
 
 # Native builds
 android/app/build/
+android/build/
 android/.gradle/
 android/local.properties
+android/captures/
+android/.cxx/
 ios/Pods/
 ios/build/
+ios/**/build/
 *.xcworkspace
 !default.xcworkspace
 
@@ -26,6 +39,7 @@ yarn-debug.log*
 yarn-error.log*
 *.log
 .cache/
+*.tsbuildinfo
 
 # IDE / Editor
 .idea/
@@ -44,11 +58,36 @@ Thumbs.db
 # Testes
 coverage/
 .nyc_output/
+*.lcov
 
-# Outros
+# Certificados e chaves (segurança)
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.cer
+*.certSigningRequest
+
+# EAS / Expo Application Services
+.easignore
+
+# Fastlane
+**/fastlane/report.xml
+**/fastlane/Preview.html
+**/fastlane/screenshots
+**/fastlane/test_output
+
+# Sentry
+.sentryclirc
+
+# Merge / backup
 *.orig.*
+*.bak
+*.rej
+
+# Outros artefatos
+*.ipa
+*.apk
+*.aab

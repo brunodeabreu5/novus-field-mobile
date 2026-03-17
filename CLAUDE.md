@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Novus Field Mobile is a React Native app built with Expo for field sales management. It provides visit tracking, client management, collections, chat, and real-time vendor tracking for sales teams. The app uses Supabase for authentication, database, and real-time features.
+Novus Field Mobile is a React Native app built with Expo for field sales management. It provides visit tracking, client management, collections, chat, and real-time vendor tracking for sales teams. The app now uses the dedicated NestJS backend for authentication, API access, chat, tracking, and notifications.
 
 ## Development Commands
 
@@ -24,8 +24,7 @@ cp .env.example .env  # Create environment file
 
 ### Environment Configuration
 Required in `.env`:
-- `EXPO_PUBLIC_SUPABASE_URL` - Supabase project URL
-- `EXPO_PUBLIC_SUPABASE_ANON_KEY` - Supabase anonymous/public key
+- `EXPO_PUBLIC_API_URL` - Backend API URL
 
 Optional (for push notifications):
 - `EXPO_PUBLIC_PROJECT_ID` - Expo project ID
@@ -41,7 +40,7 @@ The app uses a nested provider hierarchy in `App.tsx`:
 5. `RootNavigator` - Navigation container
 
 ### Authentication Flow
-- `AuthContext` (in `contexts/AuthContext.tsx`) manages Supabase auth state, user profiles, and roles
+- `AuthContext` (in `contexts/AuthContext.tsx`) manages backend auth state, user profiles, and roles
 - Three user roles: `admin`, `manager`, `vendor`
 - Auth state persists via AsyncStorage with automatic token refresh
 - Profile completion check prompts users to fill `full_name`, `phone`, `role_title`
@@ -59,7 +58,7 @@ mobile/
 ├── App.tsx              # Entry with providers
 ├── index.ts             # Expo entry point
 ├── lib/                 # Core utilities
-│   ├── supabase.ts      # Supabase client
+│   ├── backend-api.ts   # Backend API client
 │   ├── config.ts        # App config
 │   ├── types.ts         # Auto-generated DB types
 │   ├── ids.ts           # ID generation
@@ -84,11 +83,9 @@ mobile/
 
 ### Key Hooks
 
-**`usePushNotifications`** (`hooks/use-push-notifications.ts`)
-- Registers Expo push tokens to `mobile_push_tokens` table
+**Push / device permissions**
+- Registers Expo push tokens in the backend
 - Requires `EXPO_PUBLIC_PROJECT_ID` in environment for token registration
-- Token upserted with `user_id, token, platform, provider` conflict constraint
-- Returns `{ expoPushToken, permission, isLoading, subscribe }`
 
 **`useVendorTracking`** (`hooks/use-vendor-tracking.ts`)
 - For vendors only: polls location every 10 seconds
@@ -155,7 +152,7 @@ mobile/
 
 ### TanStack Query Usage
 Screens typically use:
-- `useQuery()` for fetching data with `supabase.from(...).select()`
+- `useQuery()` for fetching data from the backend API
 - `useMutation()` for writes with invalidation
 - Query keys follow pattern: `['resource', id]`
 
@@ -180,26 +177,16 @@ Offline storage queue in `lib/offline-storage.ts`:
 
 ## Code Patterns
 
-### Supabase Queries
+### Backend API
 ```typescript
-import { supabase } from './lib/supabase';
-import type { TablesInsert } from './lib/types';
+import { backendApi } from './lib/backend-api';
 
-// Fetch with TypeScript types
-const { data, error } = await supabase
-  .from("visits")
-  .select("*")
-  .eq("vendor_id", userId)
-  .order("created_at", { ascending: false });
+const data = await backendApi.get('/visits');
 
-// Insert with generated ID
-const { error } = await supabase
-  .from("visits")
-  .insert({
-    id: generateId(),
-    vendor_id: userId,
-    check_in_at: new Date().toISOString(),
-  } as TablesInsert<'visits'>);
+await backendApi.post('/visits', {
+  client_id: clientId,
+  check_in_at: new Date().toISOString(),
+});
 ```
 
 ### Geolocation Permissions

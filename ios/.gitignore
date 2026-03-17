@@ -1,10 +1,9 @@
-# OSX
-#
+# OS
 .DS_Store
 
 # Xcode
-#
 build/
+DerivedData/
 *.pbxuser
 !default.pbxuser
 *.mode1v3
@@ -13,18 +12,37 @@ build/
 !default.mode2v3
 *.perspectivev3
 !default.perspectivev3
-xcuserdata
+xcuserdata/
 *.xccheckout
 *.moved-aside
-DerivedData
 *.hmap
 *.ipa
 *.xcuserstate
+*.xcscmblueprint
 project.xcworkspace
+!default.xcworkspace
 .xcode.env.local
 
 # Bundle artifacts
 *.jsbundle
 
 # CocoaPods
-/Pods/
+Pods/
+**/Pods/
+*.xcworkspace
+!default.xcworkspace
+
+# Certificados e provisioning (nunca commitar)
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# Archives
+*.xcarchive

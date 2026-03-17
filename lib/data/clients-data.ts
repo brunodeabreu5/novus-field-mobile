@@ -1,15 +1,11 @@
-import { supabase } from "../supabase";
+import { backendApi } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
 import type { Client } from "./types";
 
 export async function fetchClients(): Promise<Client[]> {
-  const { data, error } = await supabase.from("clients").select("*").order("name");
-  if (error) {
-    throw new Error(error.message);
-  }
-  return (data || []) as Client[];
+  return backendApi.get<Client[]>("/clients?order=name");
 }
 
 export async function createClient(input: {
@@ -36,9 +32,19 @@ export async function createClient(input: {
     longitude: input.longitude ?? null,
   } as Client;
 
-  const { error } = await supabase.from("clients").insert(client);
-
-  if (error) {
+  try {
+    const created = await backendApi.post<Client>("/clients", {
+      name: client.name,
+      document: client.document,
+      phone: client.phone,
+      email: client.email,
+      address: client.address,
+      notes: client.notes,
+      latitude: client.latitude,
+      longitude: client.longitude,
+    });
+    return { client: created, queued: false as const };
+  } catch (error) {
     if (isOfflineLikeError(error)) {
       await offlineStorage.enqueue({
         type: "client_create",
@@ -57,8 +63,6 @@ export async function createClient(input: {
       });
       return { client, queued: true as const };
     }
-    throw new Error(error.message);
+    throw error;
   }
-
-  return { client, queued: false as const };
 }

@@ -15,11 +15,11 @@ App móvel nativo para Novus Field, sem WebView. Gestão de visitas, clientes, c
 cp .env.example .env
 ```
 
-2. Editar `.env` con las credenciales de Supabase:
+2. Editar `.env` con la URL del backend:
 
 ```
-EXPO_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key
+EXPO_PUBLIC_API_URL=http://localhost:4000/api
+EXPO_PUBLIC_PROJECT_ID=tu-expo-project-id
 ```
 
 3. Instalar dependencias (ya hecho si usó `npx create-expo-app`):
@@ -46,7 +46,7 @@ npm run ios
 ```
 mobile/
 ├── App.tsx              # Entry con providers
-├── lib/                 # Supabase, config, tipos, geofence
+├── lib/                 # API, config, tipos, geofence
 ├── contexts/            # AuthContext
 ├── hooks/               # use-push-notifications, use-vendor-tracking
 ├── navigation/          # RootNavigator, tabs, stack
@@ -57,7 +57,7 @@ mobile/
 
 ## Funcionalidades
 
-- **Auth**: Login, signup, perfil con Supabase
+- **Auth**: Login, signup y perfil via backend NestJS
 - **Dashboard**: KPIs y visitas recientes
 - **Visitas**: Lista, crear visita, filtro por período
 - **Clientes**: CRUD básico
@@ -68,8 +68,8 @@ mobile/
 
 ## Push Notifications
 
-El hook `usePushNotifications` registra el token Expo en `mobile_push_tokens`. Requiere configuración de EAS y proyecto Expo para envío de push.
+El hook de permisos registra el token Expo en el backend. Requiere configuración de EAS y proyecto Expo para envío de push.
 
 ## Geolocalización
 
-`useVendorTracking` envía posiciones a `vendor_positions` para el mapa de manager. Solicite permiso de ubicación al iniciar.
+`useVendorTracking` envía posiciones al backend para el mapa de manager. Solicite permiso de ubicación al iniciar.

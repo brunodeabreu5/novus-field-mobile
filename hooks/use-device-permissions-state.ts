@@ -3,8 +3,7 @@ import { Platform } from "react-native";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
-import { supabase } from "../lib/supabase";
-import type { TablesInsert } from "../lib/types";
+import { backendApi } from "../lib/backend-api";
 import { getExpoProjectId } from "../lib/config";
 
 export type PermissionState = "unknown" | "granted" | "denied" | "unsupported";
@@ -21,27 +20,11 @@ function mapPermissionStatus(
 }
 
 async function registerExpoPushToken(token: string) {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return;
-
-  const { error } = await supabase
-    .from("mobile_push_tokens")
-    .upsert(
-      {
-        user_id: user.id,
-        token,
-        platform: Platform.OS,
-        provider: "expo",
-        last_seen_at: new Date().toISOString(),
-      } as TablesInsert<"mobile_push_tokens">,
-      { onConflict: "user_id,token" }
-    );
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  await backendApi.post("/notifications/push/mobile-tokens", {
+    token,
+    platform: Platform.OS,
+    provider: "expo",
+  });
 }
 
 export function useDevicePermissionsState(sessionActive: boolean) {

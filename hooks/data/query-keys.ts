@@ -4,6 +4,7 @@ export const mobileQueryKeys = {
   dashboard: (userId: string) => ["dashboard", userId] as const,
   visits: (userId: string, period: VisitPeriod) => ["visits", userId, period] as const,
   visitTypes: ["visit-types"] as const,
+  visitSettings: ["visit-settings"] as const,
   clients: ["clients"] as const,
   charges: (userId: string) => ["charges", userId] as const,
   alerts: (userId: string) => ["alerts", userId] as const,

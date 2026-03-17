@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAlerts,
@@ -6,7 +5,6 @@ import {
   fetchLatestVendorPositions,
   fetchVendorProfiles,
 } from '../../lib/mobile-data';
-import { supabase } from '../../lib/supabase';
 import { mobileQueryKeys } from './query-keys';
 
 export function useAlertsData(userId?: string) {
@@ -22,6 +20,7 @@ export function useVendorPositions(enabled = true) {
     queryKey: mobileQueryKeys.map,
     queryFn: fetchLatestVendorPositions,
     enabled,
+    refetchInterval: enabled ? 15000 : false,
   });
 }
 
@@ -33,6 +32,7 @@ export function useVendorRouteHistory(vendorId?: string, date?: string) {
         : ["vendor-history", "idle"],
     queryFn: () => fetchVendorRouteHistory(vendorId!, date!),
     enabled: !!vendorId && !!date,
+    refetchInterval: false,
   });
 }
 
@@ -41,35 +41,12 @@ export function useVendorsData(enabled = true) {
     queryKey: mobileQueryKeys.vendors,
     queryFn: fetchVendorProfiles,
     enabled,
+    refetchInterval: enabled ? 60000 : false,
   });
 }
 
 export function useVendorPositionsSubscription(enabled = true) {
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    const channel = supabase
-      .channel('vendor_positions')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'vendor_positions',
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: mobileQueryKeys.map });
-          queryClient.invalidateQueries({ queryKey: ["vendor-history"] });
-        },
-      )
-      .subscribe();
-
-    return () => {
-      channel.unsubscribe();
-    };
-  }, [enabled, queryClient]);
+  void enabled;
+  void queryClient;
 }

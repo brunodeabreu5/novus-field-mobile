@@ -7,6 +7,7 @@ import {
   sendChatMessage,
   type ChatMessage,
   toggleChatReaction,
+  updateChatPresence,
 } from "../../lib/mobile-data";
 import { mobileQueryKeys } from "./query-keys";
 
@@ -17,6 +18,7 @@ export function useContactsData(userId?: string, canSeePresence = false) {
       : ["contacts", "anonymous", canSeePresence],
     queryFn: () => fetchContacts(userId!, canSeePresence),
     enabled: !!userId,
+    refetchInterval: 30000,
   });
 }
 
@@ -28,6 +30,7 @@ export function useMessagesData(userId?: string, otherUserId?: string) {
         : ["messages", "anonymous"],
     queryFn: () => fetchMessages(userId!, otherUserId!),
     enabled: !!userId && !!otherUserId,
+    refetchInterval: 5000,
   });
 }
 
@@ -97,5 +100,11 @@ export function useToggleChatReaction() {
 export function useOpenChatAttachment() {
   return useMutation({
     mutationFn: openChatAttachment,
+  });
+}
+
+export function useUpdateChatPresence() {
+  return useMutation({
+    mutationFn: ({ userId }: { userId: string }) => updateChatPresence(userId),
   });
 }

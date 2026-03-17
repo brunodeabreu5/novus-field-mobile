@@ -1,69 +1,44 @@
 import { startOfDay, subDays } from "date-fns";
-import { supabase } from "../supabase";
+import { backendApi } from "../backend-api";
 import { buildVisitsByHourChart } from "../dashboard";
-import type { DashboardData, Visit } from "./types";
+import type { Charge, Client, DashboardData, Visit } from "./types";
 
 export async function fetchDashboardData(userId: string): Promise<DashboardData> {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const weekAgo = startOfDay(subDays(now, 6)).toISOString();
 
-  const [visitsRes, clientsRes, chargesRes, recentRes, weekRes] = await Promise.all([
-    supabase
-      .from("visits")
-      .select("id, check_out_at, check_in_at", { count: "exact" })
-      .eq("vendor_id", userId)
-      .gte("check_in_at", today),
-    supabase
-      .from("clients")
-      .select("id", { count: "exact", head: true })
-      .eq("created_by", userId),
-    supabase
-      .from("charges")
-      .select("amount")
-      .eq("vendor_id", userId)
-      .eq("status", "pagado"),
-    supabase
-      .from("visits")
-      .select("*")
-      .eq("vendor_id", userId)
-      .order("check_in_at", { ascending: false })
-      .limit(5),
-    supabase
-      .from("visits")
-      .select("*")
-      .eq("vendor_id", userId)
-      .gte("check_in_at", weekAgo)
-      .order("check_in_at"),
+  const [allVisits, allClients, allCharges] = await Promise.all([
+    backendApi.get<Visit[]>("/visits?limit=1000"),
+    backendApi.get<Client[]>("/clients?order=name"),
+    backendApi.get<Charge[]>("/charges"),
   ]);
-
-  const firstError = [visitsRes, clientsRes, chargesRes, recentRes, weekRes].find(
-    (result) => result.error
-  )?.error;
-  if (firstError) {
-    throw new Error(firstError.message);
-  }
-
-  const totalCharges = (chargesRes.data || []).reduce(
-    (sum, charge) => sum + ((charge as { amount?: number }).amount || 0),
-    0
+  const visitsToday = allVisits.filter(
+    (visit) => visit.vendor_id === userId && visit.check_in_at >= today,
   );
-  const completedVisits = (visitsRes.data || []).filter(
-    (visit) => (visit as { check_out_at?: string | null }).check_out_at
-  ).length;
+  const recentVisits = [...allVisits]
+    .filter((visit) => visit.vendor_id === userId)
+    .sort((a, b) => new Date(b.check_in_at).getTime() - new Date(a.check_in_at).getTime())
+    .slice(0, 5);
+  const weekVisits = allVisits
+    .filter((visit) => visit.vendor_id === userId && visit.check_in_at >= weekAgo)
+    .sort((a, b) => new Date(a.check_in_at).getTime() - new Date(b.check_in_at).getTime());
+  const totalCharges = allCharges
+    .filter((charge) => charge.vendor_id === userId && charge.status === "pagado")
+    .reduce((sum, charge) => sum + (charge.amount || 0), 0);
+  const completedVisits = visitsToday.filter((visit) => visit.check_out_at).length;
+  const clientsCount = allClients.filter((client) => client.created_by === userId).length;
 
   return {
     stats: {
-      visitsToday: visitsRes.count || 0,
-      clientsCount: clientsRes.count || 0,
+      visitsToday: visitsToday.length,
+      clientsCount,
       totalCharges,
       completedVisits,
-      totalVisits: visitsRes.count || 0,
+      totalVisits: visitsToday.length,
     },
-    recentVisits: (recentRes.data || []) as Visit[],
-    visitChart: buildVisitsByHourChart(
-      (visitsRes.data || []) as Pick<Visit, "check_in_at">[]
-    ),
-    weekVisits: (weekRes.data || []) as Visit[],
+    recentVisits,
+    visitChart: buildVisitsByHourChart(visitsToday as Pick<Visit, "check_in_at">[]),
+    weekVisits,
   };
 }

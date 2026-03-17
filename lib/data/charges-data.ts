@@ -1,21 +1,11 @@
-import { supabase } from "../supabase";
+import { backendApi } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
 import type { Charge } from "./types";
 
 export async function fetchCharges(userId: string): Promise<Charge[]> {
-  const { data, error } = await supabase
-    .from("charges")
-    .select("*")
-    .eq("vendor_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return (data || []) as Charge[];
+  return backendApi.get<Charge[]>(`/charges?vendorId=${encodeURIComponent(userId)}`);
 }
 
 export async function createCharge(input: {
@@ -41,9 +31,18 @@ export async function createCharge(input: {
     status: "pendiente",
   } as Charge;
 
-  const { error } = await supabase.from("charges").insert(charge);
-
-  if (error) {
+  try {
+    const created = await backendApi.post<Charge>("/charges", {
+      client_id: charge.client_id,
+      client_name: charge.client_name,
+      amount: charge.amount,
+      due_date: charge.due_date,
+      notes: charge.notes,
+      status: charge.status,
+      currency: charge.currency,
+    });
+    return { charge: created, queued: false as const };
+  } catch (error) {
     if (isOfflineLikeError(error)) {
       await offlineStorage.enqueue({
         type: "charge_create",
@@ -60,8 +59,6 @@ export async function createCharge(input: {
       });
       return { charge, queued: true as const };
     }
-    throw new Error(error.message);
+    throw error;
   }
-
-  return { charge, queued: false as const };
 }

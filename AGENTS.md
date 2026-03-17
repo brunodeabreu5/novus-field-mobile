@@ -16,4 +16,4 @@ Automated tests are not configured yet. When adding tests, place them next to th
 Recent history uses short, imperative commit messages such as `Add native push notifications`. Keep commits focused and write messages in that style. Pull requests should include a brief summary, impacted screens or modules, environment or schema changes, and screenshots or recordings for UI work. Link the related issue when one exists.
 
 ## Security & Configuration Tips
-Copy `.env.example` to `.env` for local setup. Required variables include `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY`; `EXPO_PUBLIC_PROJECT_ID` is used for Expo project integration. Never commit real credentials or generated secrets.
+Copy `.env.example` to `.env` for local setup. Required variables include `EXPO_PUBLIC_API_URL`; `EXPO_PUBLIC_PROJECT_ID` is used for Expo project integration. Never commit real credentials or generated secrets.

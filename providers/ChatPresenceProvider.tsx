@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
-import { supabase } from "../lib/supabase";
+import { backendApi } from "../lib/backend-api";
 
 const CHAT_PRESENCE_INTERVAL_MS = 30_000;
 
@@ -24,16 +24,12 @@ export function ChatPresenceProvider({
     }
 
     const updatePresence = async () => {
-      const { error } = await supabase.from("chat_presence").upsert(
-        {
+      try {
+        await backendApi.post("/chat/presence", {
           user_id: user.id,
           last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
-
-      if (error) {
+        });
+      } catch (error) {
         console.error("Failed to update global mobile chat presence", error);
       }
     };

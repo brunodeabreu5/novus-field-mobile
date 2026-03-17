@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import { useRoute, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "../lib/supabase";
+import { backendApi } from "../lib/backend-api";
 import type { ManagerStackParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
 
@@ -29,13 +29,20 @@ export default function VendorDetailScreen() {
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      const { data } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", vendorId)
-        .single();
-      
-      setVendor(data);
+      try {
+        const data = await backendApi.get<{
+          id: string;
+          full_name: string | null;
+          role_title: string | null;
+          phone: string | null;
+          email: string;
+          document: string | null;
+          avatar_url: string | null;
+        }>(`/admin/users/${vendorId}`);
+        setVendor(data);
+      } catch {
+        setVendor(null);
+      }
       setLoading(false);
     }
     loadData();

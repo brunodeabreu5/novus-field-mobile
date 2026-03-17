@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { Session, User } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase";
 import { syncQueuedActions } from "../lib/sync";
 import {
   clearDismissedProfilePrompt,
-  clearStaleAuthStorage,
-  fetchProfile,
-  fetchRole,
   isProfileComplete,
   isProfileDismissed,
 } from "../lib/auth-data";
 import type { AppRole, Profile } from "../contexts/AuthContext";
+import {
+  type AuthSession as Session,
+  type AuthUser as User,
+  getAuthSnapshot,
+  initializeAuth,
+  subscribeAuth,
+} from "../lib/backend-auth";
 
 export function useAuthSession() {
   const [session, setSession] = useState<Session | null>(null);
@@ -21,7 +23,8 @@ export function useAuthSession() {
   const [profileIncomplete, setProfileIncomplete] = useState(false);
 
   const refreshProfile = useCallback(async (userId: string) => {
-    const nextProfile = await fetchProfile(userId);
+    const snapshot = await getAuthSnapshot();
+    const nextProfile = snapshot.user?.id === userId ? snapshot.profile : null;
     setProfile(nextProfile);
 
     if (!nextProfile) {
@@ -31,11 +34,6 @@ export function useAuthSession() {
 
     const dismissed = await isProfileDismissed();
     setProfileIncomplete(!isProfileComplete(nextProfile) && !dismissed);
-  }, []);
-
-  const refreshRole = useCallback(async (userId: string) => {
-    const nextRole = await fetchRole(userId);
-    setRole(nextRole);
   }, []);
 
   const resetAuthState = useCallback(async () => {
@@ -49,7 +47,9 @@ export function useAuthSession() {
 
   const initializeUser = useCallback(
     async (userId: string) => {
-      await Promise.all([refreshProfile(userId), refreshRole(userId)]);
+      await refreshProfile(userId);
+      const snapshot = await getAuthSnapshot();
+      setRole(snapshot.user?.id === userId ? snapshot.role : null);
 
       syncQueuedActions().then((count) => {
         if (count > 0) {
@@ -57,58 +57,52 @@ export function useAuthSession() {
         }
       });
     },
-    [refreshProfile, refreshRole]
+    [refreshProfile],
   );
 
   useEffect(() => {
-    let initialized = false;
+    getAuthSnapshot().then((snapshot) => {
+      setSession(snapshot.session);
+      setUser(snapshot.user);
+      setProfile(snapshot.profile);
+      setRole(snapshot.role);
+    });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
+    const unsubscribe = subscribeAuth(async (snapshot) => {
+      setSession(snapshot.session);
+      setUser(snapshot.user);
+      setProfile(snapshot.profile);
+      setRole(snapshot.role);
 
-      if (nextSession?.user) {
-        await initializeUser(nextSession.user.id);
+      if (snapshot.user) {
+        await initializeUser(snapshot.user.id);
       } else {
         await resetAuthState();
       }
 
-      if (initialized) {
-        setLoading(false);
-      }
+      setLoading(false);
     });
 
-    supabase.auth
-      .getSession()
-      .then(async ({ data: { session: nextSession }, error }) => {
-        initialized = true;
+    initializeAuth()
+      .then(async (snapshot) => {
+        setSession(snapshot.session);
+        setUser(snapshot.user);
+        setProfile(snapshot.profile);
+        setRole(snapshot.role);
 
-        if (error) {
-          await clearStaleAuthStorage();
+        if (snapshot.user) {
+          await initializeUser(snapshot.user.id);
+        } else {
           await resetAuthState();
-          setLoading(false);
-          return;
         }
-
-        setSession(nextSession);
-        setUser(nextSession?.user ?? null);
-
-        if (nextSession?.user) {
-          await initializeUser(nextSession.user.id);
-        }
-
-        setLoading(false);
       })
-      .catch(async () => {
-        initialized = true;
-        await clearStaleAuthStorage();
-        await resetAuthState();
+      .finally(() => {
         setLoading(false);
       });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      unsubscribe();
+    };
   }, [initializeUser, resetAuthState]);
 
   return {

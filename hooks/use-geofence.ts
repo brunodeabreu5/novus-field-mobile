@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as Location from "expo-location";
-import { supabase } from "../lib/supabase";
+import { backendApi } from "../lib/backend-api";
 import {
   GeoPosition,
   GeofenceZone,
@@ -48,50 +48,71 @@ export function useGeofence(options: UseGeofenceOptions) {
     if (!enabled || !vendorId) return;
 
     (async () => {
-      const { data: configData } = await supabase
-        .from("geofence_alert_configs")
-        .select("id, zone_id, zone_name, client_name, custom_radius_meters")
-        .eq("enabled", true);
+      type GeofenceConfigRow = {
+        id: string;
+        zone_id: string;
+        zone_name: string;
+        client_name?: string | null;
+        custom_radius_meters?: number | null;
+        enabled?: boolean;
+        assigned_vendor_ids?: string[];
+      };
 
-      if (!configData || configData.length === 0) return;
+      type ClientRow = {
+        id: string;
+        latitude?: number | null;
+        longitude?: number | null;
+      };
 
-      const zoneIds = configData.map((c) => c.zone_id).filter(Boolean);
-      const { data: clientData } = await supabase
-        .from("clients")
-        .select("id, latitude, longitude")
-        .in("id", zoneIds);
+      try {
+        const [configData, clientData] = await Promise.all([
+          backendApi.get<GeofenceConfigRow[]>("/geofence/configs"),
+          backendApi.get<ClientRow[]>("/clients?order=name"),
+        ]);
 
-      const clientMap = new Map(
-        (clientData || []).map(
-          (c: { id: string; latitude?: number | null; longitude?: number | null }) => [
-            c.id,
-            c,
-          ]
-        )
-      );
+        const activeConfigs = configData.filter((config) => {
+          if (!config.enabled) return false;
+          const assignedVendorIds = config.assigned_vendor_ids ?? [];
+          return assignedVendorIds.length === 0 || assignedVendorIds.includes(vendorId);
+        });
 
-      const zonesWithCenter: GeofenceZone[] = configData
-        .map((c) => {
-          const client = clientMap.get(c.zone_id);
-          const lat = client?.latitude;
-          const lng = client?.longitude;
+        if (activeConfigs.length === 0) {
+          setZones([]);
+          return;
+        }
 
-          if (lat == null || lng == null || lat === 0 || lng === 0) {
-            console.warn(`[Geofence] Zone ${c.zone_id} has invalid coordinates`);
-            return null;
-          }
+        const clientMap = new Map(clientData.map((client) => [client.id, client]));
 
-          return {
-            id: c.zone_id,
-            name: c.zone_name,
-            clientName: c.client_name ?? c.zone_name ?? "Cliente",
-            center: { lat, lng },
-            radiusMeters: c.custom_radius_meters || 50,
-          } as GeofenceZone;
-        })
-        .filter((z): z is GeofenceZone => z !== null);
+        const zonesWithCenter: GeofenceZone[] = activeConfigs
+          .map((config) => {
+            const client = clientMap.get(config.zone_id);
+            const lat = client?.latitude;
+            const lng = client?.longitude;
 
-      setZones(zonesWithCenter);
+            if (lat == null || lng == null || lat === 0 || lng === 0) {
+              console.warn(`[Geofence] Zone ${config.zone_id} has invalid coordinates`);
+              return null;
+            }
+
+            return {
+              id: config.zone_id,
+              name: config.zone_name,
+              clientName: config.client_name ?? config.zone_name ?? "Cliente",
+              center: { lat, lng },
+              radiusMeters: config.custom_radius_meters || 50,
+            } as GeofenceZone;
+          })
+          .filter((zone): zone is GeofenceZone => zone !== null);
+
+        setZones(zonesWithCenter);
+      } catch (loadError) {
+        console.warn("[Geofence] Failed to load zones from backend", loadError);
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load geofence zones",
+        );
+      }
     })();
   }, [enabled, vendorId]);
 
