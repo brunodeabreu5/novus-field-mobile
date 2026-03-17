@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
+import { useAuth } from "../contexts/AuthContext";
+import { isExpectedAuthError } from "../lib/auth-errors";
 import { backendApi } from "../lib/backend-api";
 import { offlineStorage } from "../lib/offline-storage";
 import { isOfflineLikeError } from "../lib/sync";
@@ -56,7 +58,7 @@ async function publishTrackingHeartbeat(
     last_position_at: payload.lastPositionAt ?? null,
     last_error: payload.lastError ?? null,
   }).catch((error) => {
-    if (!isOfflineLikeError(error)) {
+    if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
       console.warn(
         "[Tracking] Heartbeat update failed:",
         error instanceof Error ? error.message : error,
@@ -128,6 +130,10 @@ async function persistPosition(
       recorded_at: payload.recorded_at,
     });
   } catch (error) {
+    if (isExpectedAuthError(error)) {
+      throw error;
+    }
+
     if (isOfflineLikeError(error)) {
       await offlineStorage.enqueue({
         type: "vendor_position",
@@ -186,6 +192,10 @@ if (!taskDefined) {
             trackingMode: "background",
           });
         } catch (insertError) {
+          if (isExpectedAuthError(insertError)) {
+            return;
+          }
+
           console.warn(
             "[Tracking] Background position failed:",
             insertError instanceof Error ? insertError.message : insertError
@@ -202,6 +212,7 @@ export function useVendorTracking(options: {
   vendorId?: string | null;
 }) {
   const { enabled, vendorId } = options;
+  const { session, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [trackingState, setTrackingState] = useState<
     "background" | "foreground_only" | "denied" | "error" | null
@@ -213,10 +224,24 @@ export function useVendorTracking(options: {
     let foregroundSubscription: Location.LocationSubscription | null = null;
     let active = true;
 
-    const startHeartbeatLoop = (trackingMode: "background" | "foreground_only") => {
+    const stopHeartbeatLoop = () => {
       if (heartbeatTimerRef.current) {
         clearInterval(heartbeatTimerRef.current);
+        heartbeatTimerRef.current = null;
       }
+    };
+
+    const pauseTrackingNetwork = () => {
+      stopHeartbeatLoop();
+
+      if (foregroundSubscription) {
+        foregroundSubscription.remove();
+        foregroundSubscription = null;
+      }
+    };
+
+    const startHeartbeatLoop = (trackingMode: "background" | "foreground_only") => {
+      stopHeartbeatLoop();
 
       heartbeatTimerRef.current = setInterval(async () => {
         const heartbeatPayload = {
@@ -249,6 +274,15 @@ export function useVendorTracking(options: {
             setError(null);
           }
         } catch (heartbeatError) {
+          if (isExpectedAuthError(heartbeatError)) {
+            pauseTrackingNetwork();
+            if (active) {
+              setError(null);
+              setTrackingState(trackingMode);
+            }
+            return;
+          }
+
           const nextError =
             heartbeatError instanceof Error
               ? heartbeatError.message
@@ -266,11 +300,8 @@ export function useVendorTracking(options: {
       }, TRACKING_HEARTBEAT_MS);
     };
 
-    const stopTracking = async () => {
-      if (foregroundSubscription) {
-        foregroundSubscription.remove();
-        foregroundSubscription = null;
-      }
+    const stopTrackingCompletely = async () => {
+      pauseTrackingNetwork();
 
       const started = await Location.hasStartedLocationUpdatesAsync(TRACKING_TASK_NAME);
       if (started) {
@@ -287,7 +318,23 @@ export function useVendorTracking(options: {
           setTrackingState(null);
           setError(null);
         }
-        await stopTracking();
+        await stopTrackingCompletely();
+        return;
+      }
+
+      if (loading) {
+        pauseTrackingNetwork();
+        if (active) {
+          setError(null);
+        }
+        return;
+      }
+
+      if (!session) {
+        pauseTrackingNetwork();
+        if (active) {
+          setError(null);
+        }
         return;
       }
 
@@ -367,6 +414,15 @@ export function useVendorTracking(options: {
                 setTrackingState("foreground_only");
               }
             } catch (watchError) {
+              if (isExpectedAuthError(watchError)) {
+                pauseTrackingNetwork();
+                if (active) {
+                  setError(null);
+                  setTrackingState("foreground_only");
+                }
+                return;
+              }
+
               if (active) {
                 setError(
                   watchError instanceof Error
@@ -380,6 +436,14 @@ export function useVendorTracking(options: {
         );
         startHeartbeatLoop("foreground_only");
       } catch (trackingError) {
+        if (isExpectedAuthError(trackingError)) {
+          pauseTrackingNetwork();
+          if (active) {
+            setError(null);
+          }
+          return;
+        }
+
         if (active) {
           const nextError =
             trackingError instanceof Error
@@ -403,16 +467,10 @@ export function useVendorTracking(options: {
 
     return () => {
       active = false;
-      if (heartbeatTimerRef.current) {
-        clearInterval(heartbeatTimerRef.current);
-        heartbeatTimerRef.current = null;
-      }
-      if (foregroundSubscription) {
-        foregroundSubscription.remove();
-      }
+      pauseTrackingNetwork();
 
       if (!enabled || !vendorId) {
-        stopTracking().catch((stopError) => {
+        stopTrackingCompletely().catch((stopError) => {
           console.warn(
             "[Tracking] Failed to stop:",
             stopError instanceof Error ? stopError.message : stopError
@@ -420,7 +478,7 @@ export function useVendorTracking(options: {
         });
       }
     };
-  }, [enabled, vendorId]);
+  }, [enabled, loading, session, vendorId]);
 
   return { error, trackingState };
 }

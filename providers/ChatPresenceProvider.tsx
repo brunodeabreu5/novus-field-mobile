@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
+import { isExpectedAuthError } from "../lib/auth-errors";
 import { backendApi } from "../lib/backend-api";
 
 const CHAT_PRESENCE_INTERVAL_MS = 30_000;
@@ -10,16 +11,20 @@ export function ChatPresenceProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, session } = useAuth();
+  const { user, session, loading } = useAuth();
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (!user || !session) {
+    const stopPresenceLoop = () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+    };
+
+    if (loading || !user || !session) {
+      stopPresenceLoop();
       return;
     }
 
@@ -30,6 +35,11 @@ export function ChatPresenceProvider({
           last_seen_at: new Date().toISOString(),
         });
       } catch (error) {
+        if (isExpectedAuthError(error)) {
+          stopPresenceLoop();
+          return;
+        }
+
         console.error("Failed to update global mobile chat presence", error);
       }
     };
@@ -43,13 +53,6 @@ export function ChatPresenceProvider({
       intervalRef.current = setInterval(() => {
         updatePresence().catch(() => undefined);
       }, CHAT_PRESENCE_INTERVAL_MS);
-    };
-
-    const stopPresenceLoop = () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
     };
 
     if (appStateRef.current === "active") {
@@ -70,7 +73,7 @@ export function ChatPresenceProvider({
       subscription.remove();
       stopPresenceLoop();
     };
-  }, [session, user]);
+  }, [loading, session, user]);
 
   return <>{children}</>;
 }

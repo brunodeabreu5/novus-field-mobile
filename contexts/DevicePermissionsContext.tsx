@@ -17,6 +17,7 @@ interface DevicePermissionsContextValue {
   lastError: string | null;
   refreshPermissions: () => Promise<void>;
   requestLocationPermission: () => Promise<void>;
+  requestBackgroundLocationPermission: () => Promise<void>;
   requestNotificationPermission: () => Promise<void>;
 }
 

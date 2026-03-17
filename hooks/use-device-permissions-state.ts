@@ -27,6 +27,18 @@ async function registerExpoPushToken(token: string) {
   });
 }
 
+function isExpoProjectIdConfigurationError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+
+  return (
+    message.includes("VALIDATION_ERROR") ||
+    message.includes("projectId") ||
+    message.includes("Project ID") ||
+    message.includes("Expected an OK response, received: 400")
+  );
+}
+
 export function useDevicePermissionsState(sessionActive: boolean) {
   const [locationPermission, setLocationPermission] = useState<PermissionState>(
     isWeb ? "unsupported" : "unknown"
@@ -143,6 +155,48 @@ export function useDevicePermissionsState(sessionActive: boolean) {
     }
   }, [loadCurrentLocation]);
 
+  const requestBackgroundLocationPermission = useCallback(async () => {
+    if (isWeb) return;
+
+    setIsLoading(true);
+    setLastError(null);
+    try {
+      let foregroundStatus = (await Location.getForegroundPermissionsAsync()).status;
+
+      if (foregroundStatus !== "granted") {
+        foregroundStatus = (await Location.requestForegroundPermissionsAsync()).status;
+      }
+
+      const nextLocationPermission = mapPermissionStatus(foregroundStatus);
+      setLocationPermission(nextLocationPermission);
+
+      if (nextLocationPermission !== "granted") {
+        setBackgroundLocationPermission("denied");
+        setLastLocation(null);
+        return;
+      }
+
+      await loadCurrentLocation();
+
+      if (isExpoGo) {
+        setBackgroundLocationPermission("unsupported");
+        return;
+      }
+
+      const { status: backgroundStatus } =
+        await Location.requestBackgroundPermissionsAsync();
+      setBackgroundLocationPermission(mapPermissionStatus(backgroundStatus));
+    } catch (error) {
+      setLastError(
+        error instanceof Error
+          ? error.message
+          : "Failed to request background location"
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loadCurrentLocation]);
+
   const requestNotificationPermission = useCallback(async () => {
     if (isWeb || isExpoGo) return;
 
@@ -173,6 +227,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       isExpoGo ||
       notificationPermission !== "granted"
     ) {
+      setExpoPushToken(null);
       return;
     }
 
@@ -180,7 +235,8 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       try {
         const projectId = getExpoProjectId();
         if (!projectId) {
-          setLastError("EXPO_PUBLIC_PROJECT_ID not configured");
+          setExpoPushToken(null);
+          registeredTokenRef.current = null;
           return;
         }
 
@@ -195,6 +251,13 @@ export function useDevicePermissionsState(sessionActive: boolean) {
         await registerExpoPushToken(token);
         registeredTokenRef.current = token;
       } catch (error) {
+        if (isExpoProjectIdConfigurationError(error)) {
+          setExpoPushToken(null);
+          registeredTokenRef.current = null;
+          setLastError(null);
+          return;
+        }
+
         setLastError(
           error instanceof Error ? error.message : "Push registration failed"
         );
@@ -215,6 +278,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       lastError,
       refreshPermissions,
       requestLocationPermission,
+      requestBackgroundLocationPermission,
       requestNotificationPermission,
     }),
     [
@@ -227,6 +291,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       notificationPermission,
       refreshPermissions,
       requestLocationPermission,
+      requestBackgroundLocationPermission,
       requestNotificationPermission,
     ]
   );

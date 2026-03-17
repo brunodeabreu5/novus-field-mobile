@@ -42,6 +42,7 @@ export default function AccountScreen() {
     lastError,
     refreshPermissions,
     requestLocationPermission,
+    requestBackgroundLocationPermission,
     requestNotificationPermission,
   } = useDevicePermissions();
   const { trackingState, trackingError } = useTrackingStatus();
@@ -267,10 +268,19 @@ export default function AccountScreen() {
                 : "Pendente"}
           </Text>
           {backgroundLocationPermission !== "granted" ? (
-            <Text style={styles.testSubtext}>
-              Sin este permiso, el historial solo se completa cuando la app esta
-              abierta.
-            </Text>
+            <>
+              <Text style={styles.testSubtext}>
+                Sin este permiso, el historial solo se completa cuando la app esta
+                abierta.
+              </Text>
+              <TouchableOpacity
+                style={[styles.testBtn, styles.testBtnPrimary]}
+                onPress={requestBackgroundLocationPermission}
+                disabled={isLoading}
+              >
+                <Text style={styles.testBtnTextPrimary}>Ativar em background</Text>
+              </TouchableOpacity>
+            </>
           ) : (
             <Text style={styles.testSubtext}>
               Para el rastreo mas estable posible, deje la app autorizada en
