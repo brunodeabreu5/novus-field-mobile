@@ -1,6 +1,5 @@
 import { getAccessToken } from "./backend-auth";
-
-const API_URL = (process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000/api").trim();
+import { getBackendApiUrl } from "./tenant-config";
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const accessToken = await getAccessToken();
@@ -8,7 +7,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error("No active backend session");
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const apiUrl = await getBackendApiUrl();
+  const response = await fetch(`${apiUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",

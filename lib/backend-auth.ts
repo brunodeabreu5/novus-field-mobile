@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { resolveBackendApiUrl } from "./config";
+import { getBackendApiUrl } from "./tenant-config";
 
 export type AppRole = "admin" | "manager" | "vendor";
 
@@ -58,7 +58,6 @@ export interface AuthSnapshot {
 }
 
 const AUTH_STORAGE_KEY = "backend_auth_session";
-const API_URL = resolveBackendApiUrl();
 const listeners = new Set<(snapshot: AuthSnapshot) => void>();
 
 function normalizeProfile(user: BackendUserPayload): AuthProfile {
@@ -132,7 +131,8 @@ async function request<T>(
   init: RequestInit = {},
   accessToken?: string,
 ): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const apiUrl = await getBackendApiUrl();
+  const response = await fetch(`${apiUrl}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -162,6 +162,11 @@ function storeAuthResponse(data: BackendAuthResponse) {
     emit(nextState);
     return toSnapshot(nextState);
   });
+}
+
+export async function clearStoredAuthState() {
+  await writeStoredState(null);
+  emit(null);
 }
 
 export async function getAuthSnapshot(): Promise<AuthSnapshot> {

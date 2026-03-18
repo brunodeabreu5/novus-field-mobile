@@ -12,6 +12,7 @@ import {
   type TextStyle,
 } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
+import { useTenant } from "../contexts/TenantContext";
 import { useDevicePermissions } from "../contexts/DevicePermissionsContext";
 import type { PermissionState } from "../hooks/use-device-permissions-state";
 import FormActions from "../components/FormActions";
@@ -433,6 +434,7 @@ export default function AccountScreen() {
     requestNotificationPermission,
   } = useDevicePermissions();
   const { trackingState, trackingError } = useTrackingStatus();
+  const { clearTenant, tenant } = useTenant();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fullName, setFullName] = useState(profile?.full_name || "");
@@ -469,6 +471,22 @@ export default function AccountScreen() {
         style: "destructive",
         onPress: () => {
           void signOut();
+        },
+      },
+    ]);
+  };
+
+  const handleChangeTenant = () => {
+    Alert.alert("Cambiar empresa", `Desea salir de ${tenant?.displayName || "la empresa actual"} y elegir otra?`, [
+      { text: "Cancelar", style: "cancel" },
+      {
+        text: "Cambiar",
+        style: "destructive",
+        onPress: () => {
+          void (async () => {
+            await signOut();
+            await clearTenant();
+          })();
         },
       },
     ]);
@@ -583,6 +601,10 @@ export default function AccountScreen() {
 
       <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
         <Text style={styles.signOutText}>Cerrar sesion</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.switchTenantBtn} onPress={handleChangeTenant}>
+        <Text style={styles.switchTenantText}>Cambiar empresa</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -701,4 +723,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   signOutText: { color: colors.destructive, fontWeight: "600" },
+  switchTenantBtn: {
+    marginTop: 12,
+    padding: 14,
+    alignItems: "center",
+  },
+  switchTenantText: { color: colors.primary, fontWeight: "600" },
 });
+
+
+
+
+

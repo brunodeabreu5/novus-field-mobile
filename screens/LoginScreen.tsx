@@ -12,6 +12,7 @@ import {
   Image,
 } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
+import { useTenant } from "../contexts/TenantContext";
 import { colors } from "../theme/colors";
 import { spacing, fontSize, radius } from "../theme/spacing";
 
@@ -28,6 +29,7 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { signIn, signUp } = useAuth();
+  const { tenant, clearTenant } = useTenant();
 
   const validate = (): boolean => {
     if (!email.trim()) {
@@ -97,6 +99,22 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
           <Text style={styles.subtitle}>
             Gestion de equipos comerciales en campo
           </Text>
+          {tenant ? (
+            <View style={styles.tenantCard}>
+              <Text style={styles.tenantLabel}>Empresa conectada</Text>
+              <Text style={styles.tenantName}>{tenant.displayName}</Text>
+              <Text style={styles.tenantMeta}>{tenant.slug}</Text>
+              <TouchableOpacity
+                style={styles.changeTenantButton}
+                onPress={() => {
+                  setError(null);
+                  void clearTenant();
+                }}
+              >
+                <Text style={styles.changeTenantText}>Cambiar empresa</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.form}>
@@ -235,6 +253,41 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: f.md,
     color: colors.mutedForeground,
+  },
+  tenantCard: {
+    marginTop: s.lg,
+    width: "100%",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: r.md,
+    backgroundColor: colors.card,
+    padding: s.md,
+  },
+  tenantLabel: {
+    fontSize: f.xs,
+    fontWeight: "700",
+    color: colors.primary,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: s.xs,
+  },
+  tenantName: {
+    fontSize: f.lg,
+    fontWeight: "700",
+    color: colors.foreground,
+  },
+  tenantMeta: {
+    fontSize: f.sm,
+    color: colors.mutedForeground,
+    marginTop: 2,
+  },
+  changeTenantButton: {
+    marginTop: s.md,
+  },
+  changeTenantText: {
+    color: colors.primary,
+    fontWeight: "600",
+    fontSize: f.sm,
   },
   form: {
     flex: 1,

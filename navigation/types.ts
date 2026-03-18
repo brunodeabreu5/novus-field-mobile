@@ -23,4 +23,5 @@ export type ManagerStackParamList = {
 export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList>;
   Login: undefined;
+  TenantBootstrap: undefined;
 };

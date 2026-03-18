@@ -5,6 +5,7 @@ type MobileEnv = {
   EXPO_PUBLIC_PROJECT_ID?: string;
   EXPO_PUBLIC_API_URL?: string;
   EXPO_PUBLIC_WS_URL?: string;
+  EXPO_PUBLIC_CONTROL_API_URL?: string;
   [key: string]: unknown;
 };
 
@@ -51,4 +52,9 @@ export function resolveBackendApiUrl(): string {
 export function resolveBackendWsUrl(): string {
   const env = process.env as MobileEnv;
   return deriveBackendWsUrl(resolveBackendApiUrl(), env.EXPO_PUBLIC_WS_URL);
+}
+
+export function resolveControlApiUrl(): string {
+  const env = process.env as MobileEnv;
+  return env.EXPO_PUBLIC_CONTROL_API_URL?.trim() || "http://localhost:4010/api";
 }

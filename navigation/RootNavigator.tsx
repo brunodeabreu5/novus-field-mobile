@@ -6,9 +6,11 @@ import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from "rea
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "../contexts/AuthContext";
+import { useTenant } from "../contexts/TenantContext";
 import MenuButton from "../components/MenuButton";
 import DrawerMenu from "../components/DrawerMenu";
 import LoginScreen from "../screens/LoginScreen";
+import TenantBootstrapScreen from "../screens/TenantBootstrapScreen";
 import DashboardScreen from "../screens/DashboardScreen";
 import VisitsScreen from "../screens/VisitsScreen";
 import ClientsScreen from "../screens/ClientsScreen";
@@ -221,6 +223,7 @@ function ManagerStackScreen() {
 }
 
 export default function RootNavigator() {
+  const { configured } = useTenant();
   const { session, loading, biometricLoading, biometricRequired } = useAuth();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const pendingContactIdRef = useRef<string | null>(null);
@@ -296,6 +299,16 @@ export default function RootNavigator() {
       responseSubscription.remove();
     };
   }, [handleNotificationData, session]);
+
+  if (!configured) {
+    return (
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="TenantBootstrap" component={TenantBootstrapScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    );
+  }
 
   if (loading || biometricLoading) {
     return <LoadingScreen />;

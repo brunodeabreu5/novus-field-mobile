@@ -21,6 +21,7 @@ expo-env.d.ts
 metro-cache/
 
 # Native builds
+android/
 android/app/build/
 android/build/
 android/.gradle/

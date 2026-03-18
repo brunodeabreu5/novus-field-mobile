@@ -36,7 +36,7 @@ import {
   useUpdateChatPresence,
 } from "../hooks/use-mobile-data";
 import type { ChatAttachment, ChatMessage, Contact, DraftChatAttachment } from "../lib/mobile-data";
-import { resolveBackendWsUrl } from "../lib/config";
+import { getBackendWsUrl } from "../lib/tenant-config";
 import type { MainTabParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
 
@@ -218,7 +218,8 @@ export default function ChatScreen() {
       const token = await getAccessToken();
       if (!token || cancelled) return;
 
-      const socket = io(`${resolveBackendWsUrl()}/chat`, {
+      const wsBaseUrl = await getBackendWsUrl();
+      const socket = io(`${wsBaseUrl}/chat`, {
         auth: { token },
         transports: ["websocket"],
       });
@@ -1239,3 +1240,5 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
+
+
