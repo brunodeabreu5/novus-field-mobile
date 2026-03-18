@@ -23,7 +23,29 @@ interface TrackingLocationBatch {
 
 interface TrackingPersistenceOptions {
   force?: boolean;
-  trackingMode: "background" | "foreground_only";
+  trackingMode: "background";
+}
+
+interface CachedTrackingLocation {
+  latitude: number;
+  longitude: number;
+  timestamp: number;
+  accuracy?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+}
+
+type MutableRef<T> = { current: T };
+
+interface TrackingLifecycleHandlers {
+  readonly active: () => boolean;
+  readonly lastLocationRef: MutableRef<Location.LocationObject | null>;
+  readonly pauseTrackingNetwork: () => void;
+  readonly setError: (value: string | null) => void;
+  readonly setTrackingState: (
+    value: "background" | "denied" | "error" | null
+  ) => void;
+  readonly startHeartbeatLoop: (trackingMode: "background") => void;
 }
 
 function haversineDistanceMeters(
@@ -43,10 +65,377 @@ function haversineDistanceMeters(
   return 2 * earthRadiusM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function formatSpeedKmh(speed: number | null | undefined) {
+  if (speed == null) {
+    return null;
+  }
+
+  return speed * 3.6;
+}
+
+function buildIdleSnapshot(loc: Location.LocationObject) {
+  const timestampMs = loc.timestamp ?? Date.now();
+  const snapshot = {
+    latitude: loc.coords.latitude,
+    longitude: loc.coords.longitude,
+    timestamp: timestampMs,
+    accuracy: loc.coords.accuracy ?? null,
+    speed: loc.coords.speed ?? null,
+    heading: loc.coords.heading ?? null,
+  };
+
+  return {
+    snapshot,
+    timestampMs,
+  };
+}
+
+function buildLocationFromSnapshot(snapshot: CachedTrackingLocation) {
+  return {
+    coords: {
+      latitude: snapshot.latitude,
+      longitude: snapshot.longitude,
+      accuracy: snapshot.accuracy ?? null,
+      altitude: null,
+      altitudeAccuracy: null,
+      heading: snapshot.heading ?? null,
+      speed: snapshot.speed ?? null,
+    },
+    timestamp: snapshot.timestamp,
+    mocked: false,
+  } as Location.LocationObject;
+}
+
+function calculateIdleState(
+  loc: Location.LocationObject,
+  lastLocationRaw: string | null
+) {
+  let isIdle = false;
+  let idleDurationSeconds: number | null = null;
+
+  if (lastLocationRaw !== null) {
+    try {
+      const previous = JSON.parse(lastLocationRaw) as {
+        latitude: number;
+        longitude: number;
+        timestamp: number;
+      };
+      const distance = haversineDistanceMeters(
+        { latitude: previous.latitude, longitude: previous.longitude },
+        { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
+      );
+      const elapsedSeconds = Math.max(
+        0,
+        Math.round(((loc.timestamp ?? Date.now()) - previous.timestamp) / 1000)
+      );
+
+      if (distance < TRACKING_MIN_DISPLACEMENT_M) {
+        isIdle = true;
+        idleDurationSeconds = elapsedSeconds;
+      }
+    } catch {
+      // Ignore corrupt cache and continue with fresh state.
+    }
+  }
+
+  return { isIdle, idleDurationSeconds };
+}
+
+async function resolveCurrentLocation() {
+  try {
+    const lastKnown = await Location.getLastKnownPositionAsync({});
+    if (lastKnown) {
+      return lastKnown;
+    }
+  } catch {
+    // Ignore and fall back to a live location request.
+  }
+
+  try {
+    const cachedRaw = await AsyncStorage.getItem(TRACKING_LAST_LOCATION_KEY);
+    if (cachedRaw) {
+      const cached = JSON.parse(cachedRaw) as CachedTrackingLocation;
+      if (
+        typeof cached.latitude === "number" &&
+        typeof cached.longitude === "number" &&
+        typeof cached.timestamp === "number"
+      ) {
+        return buildLocationFromSnapshot(cached);
+      }
+    }
+  } catch {
+    // Ignore corrupted cache and continue to live location.
+  }
+
+  try {
+    return await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.Balanced,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function isTransientLocationTaskError(error: unknown) {
+  const message = getUnknownErrorMessage(error);
+
+  return message.includes("kCLErrorDomain Code=0");
+}
+
+function getUnknownErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "";
+}
+
+async function persistVendorPositionInOfflineQueue(
+  vendorId: string,
+  payload: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters: number | null;
+    speedKmh: number | null;
+    heading: number | null;
+    isIdle: boolean;
+    idleDurationSeconds: number | null;
+    recordedAt: string;
+  }
+) {
+  await offlineStorage.enqueue({
+    type: "vendor_position",
+    payload: {
+      vendorId,
+      latitude: payload.latitude,
+      longitude: payload.longitude,
+      accuracyMeters: payload.accuracyMeters,
+      speedKmh: payload.speedKmh,
+      heading: payload.heading,
+      isIdle: payload.isIdle,
+      idleDurationSeconds: payload.idleDurationSeconds,
+      recordedAt: payload.recordedAt,
+    },
+  });
+}
+
+async function processBackgroundLocationBatch(vendorId: string, locations: Location.LocationObject[]) {
+  if (locations.length === 0) {
+    const fallbackLocation = await resolveCurrentLocation();
+    if (!fallbackLocation) {
+      return;
+    }
+
+    try {
+      await persistPosition(vendorId, fallbackLocation, {
+        trackingMode: "background",
+      });
+    } catch (insertError) {
+      if (isExpectedAuthError(insertError)) {
+        return;
+      }
+
+      console.warn(
+        "[Tracking] Background fallback position failed:",
+        getUnknownErrorMessage(insertError)
+      );
+    }
+
+    return;
+  }
+
+  for (const location of locations) {
+    try {
+      await persistPosition(vendorId, location, {
+        trackingMode: "background",
+      });
+    } catch (insertError) {
+      if (isExpectedAuthError(insertError)) {
+        return;
+      }
+
+      console.warn(
+        "[Tracking] Background position failed:",
+        getUnknownErrorMessage(insertError)
+      );
+    }
+  }
+}
+
+async function runHeartbeatTick(
+  vendorId: string,
+  trackingMode: "background",
+  handlers: TrackingLifecycleHandlers
+) {
+  const heartbeatPayload = {
+    trackingMode,
+    lastPositionAt: handlers.lastLocationRef.current?.timestamp
+      ? new Date(handlers.lastLocationRef.current.timestamp).toISOString()
+      : null,
+  } as const;
+
+  if (!handlers.lastLocationRef.current) {
+    const currentLocation = await resolveCurrentLocation();
+    if (currentLocation === null) {
+      await publishTrackingHeartbeat(vendorId, heartbeatPayload);
+      return;
+    }
+
+    handlers.lastLocationRef.current = currentLocation;
+  }
+
+  try {
+    await persistPosition(vendorId, handlers.lastLocationRef.current, {
+      force: true,
+      trackingMode,
+    });
+    if (handlers.active()) {
+      handlers.setError(null);
+    }
+  } catch (heartbeatError) {
+    if (isExpectedAuthError(heartbeatError)) {
+      handlers.pauseTrackingNetwork();
+      if (handlers.active()) {
+        handlers.setError(null);
+        handlers.setTrackingState(trackingMode);
+      }
+      return;
+    }
+
+    const nextError =
+      heartbeatError instanceof Error
+        ? heartbeatError.message
+        : "Tracking heartbeat error";
+    if (handlers.active()) {
+      handlers.setError(nextError);
+      handlers.setTrackingState("error");
+    }
+    await publishTrackingHeartbeat(vendorId, {
+      trackingMode: "error",
+      lastError: nextError,
+      lastPositionAt: heartbeatPayload.lastPositionAt,
+    });
+  }
+}
+
+async function initializeTrackingSession(
+  vendorId: string,
+  handlers: TrackingLifecycleHandlers
+) {
+  await AsyncStorage.setItem(TRACKING_VENDOR_ID_KEY, vendorId);
+
+  const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
+  if (foregroundStatus !== "granted") {
+    if (handlers.active()) {
+      handlers.setTrackingState("denied");
+    }
+    await publishTrackingHeartbeat(vendorId, {
+      trackingMode: "denied",
+      lastError: "Location permission not granted",
+    });
+    throw new Error("Location permission not granted");
+  }
+
+  const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
+  if (backgroundStatus !== "granted") {
+    if (handlers.active()) {
+      handlers.setTrackingState("denied");
+      handlers.setError("Background location permission not granted");
+    }
+    await publishTrackingHeartbeat(vendorId, {
+      trackingMode: "denied",
+      lastError: "Background location permission not granted",
+    });
+    return false;
+  }
+
+  if (handlers.active()) {
+    handlers.setTrackingState("background");
+  }
+
+  const started = await Location.hasStartedLocationUpdatesAsync(TRACKING_TASK_NAME);
+  if (!started) {
+    await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
+      accuracy: Location.Accuracy.Highest,
+      timeInterval: TRACKING_INTERVAL_MS,
+      distanceInterval: TRACKING_MIN_DISPLACEMENT_M,
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: true,
+      foregroundService: {
+        notificationTitle: "Novus Field tracking ativo",
+        notificationBody: "Registrando localizacao do vendedor em campo.",
+      },
+    });
+  }
+
+  const currentLocation = await resolveCurrentLocation();
+  if (currentLocation) {
+    handlers.lastLocationRef.current = currentLocation;
+    await persistPosition(vendorId, currentLocation, {
+      trackingMode: "background",
+    });
+  }
+  handlers.startHeartbeatLoop("background");
+
+  if (handlers.active()) {
+    handlers.setError(null);
+  }
+
+  return true;
+}
+
+async function resetTrackingLifecycle(
+  stopTrackingCompletely: () => Promise<void>,
+  handlers: TrackingLifecycleHandlers
+) {
+  handlers.pauseTrackingNetwork();
+  if (handlers.active()) {
+    handlers.setTrackingState(null);
+    handlers.setError(null);
+  }
+  await stopTrackingCompletely();
+}
+
+function pauseTrackingLifecycle(handlers: TrackingLifecycleHandlers) {
+  handlers.pauseTrackingNetwork();
+  if (handlers.active()) {
+    handlers.setError(null);
+  }
+}
+
+async function handleTrackingFailure(
+  vendorId: string,
+  trackingError: unknown,
+  handlers: TrackingLifecycleHandlers
+) {
+  if (isExpectedAuthError(trackingError)) {
+    handlers.pauseTrackingNetwork();
+    if (handlers.active()) {
+      handlers.setError(null);
+    }
+    return;
+  }
+
+  const nextError =
+    trackingError instanceof Error ? trackingError.message : "Location tracking error";
+  if (handlers.active()) {
+    handlers.setError(nextError);
+    handlers.setTrackingState("error");
+  }
+  void publishTrackingHeartbeat(vendorId, {
+    trackingMode: "error",
+    lastError: nextError,
+  });
+}
+
 async function publishTrackingHeartbeat(
   vendorId: string,
   payload: {
-    trackingMode: "background" | "foreground_only" | "denied" | "error";
+    trackingMode: "background" | "denied" | "error";
     lastPositionAt?: string | null;
     lastError?: string | null;
   }
@@ -73,36 +462,21 @@ async function persistPosition(
   loc: Location.LocationObject,
   options: TrackingPersistenceOptions
 ) {
-  const timestampIso = loc.timestamp
-    ? new Date(loc.timestamp).toISOString()
-    : new Date().toISOString();
-  let isIdle = false;
-  let idleDurationSeconds: number | null = null;
-
+  const { snapshot: lastLocationSnapshot, timestampMs } = buildIdleSnapshot(loc);
+  const timestampIso = new Date(timestampMs).toISOString();
   const lastLocationRaw = await AsyncStorage.getItem(TRACKING_LAST_LOCATION_KEY);
-  if (lastLocationRaw) {
-    try {
-      const previous = JSON.parse(lastLocationRaw) as {
-        latitude: number;
-        longitude: number;
-        timestamp: number;
-      };
-      const distance = haversineDistanceMeters(
-        { latitude: previous.latitude, longitude: previous.longitude },
-        { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
-      );
-      const elapsedSeconds = Math.max(
-        0,
-        Math.round(((loc.timestamp ?? Date.now()) - previous.timestamp) / 1000)
-      );
+  const { isIdle, idleDurationSeconds } = calculateIdleState(loc, lastLocationRaw);
 
-      if (distance < TRACKING_MIN_DISPLACEMENT_M) {
-        isIdle = true;
-        idleDurationSeconds = elapsedSeconds;
-      }
-    } catch {
-      // Ignore corrupt cache and continue with fresh state.
-    }
+  try {
+    await AsyncStorage.setItem(
+      TRACKING_LAST_LOCATION_KEY,
+      JSON.stringify(lastLocationSnapshot)
+    );
+  } catch (storageError) {
+    console.warn(
+      "[Tracking] Failed to persist last location cache:",
+      storageError instanceof Error ? storageError.message : storageError
+    );
   }
 
   const payload = {
@@ -110,7 +484,7 @@ async function persistPosition(
     latitude: loc.coords.latitude,
     longitude: loc.coords.longitude,
     accuracy_meters: loc.coords.accuracy ?? null,
-    speed_kmh: loc.coords.speed != null ? loc.coords.speed * 3.6 : null,
+    speed_kmh: formatSpeedKmh(loc.coords.speed),
     heading: loc.coords.heading ?? null,
     idle_duration_seconds: idleDurationSeconds,
     is_idle: isIdle,
@@ -135,17 +509,15 @@ async function persistPosition(
     }
 
     if (isOfflineLikeError(error)) {
-      await offlineStorage.enqueue({
-        type: "vendor_position",
-        payload: {
-          vendorId,
-          latitude: payload.latitude,
-          longitude: payload.longitude,
-          accuracyMeters: payload.accuracy_meters,
-          speedKmh: payload.speed_kmh,
-          heading: payload.heading,
-          recordedAt: payload.recorded_at,
-        },
+      await persistVendorPositionInOfflineQueue(vendorId, {
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        accuracyMeters: payload.accuracy_meters,
+        speedKmh: payload.speed_kmh,
+        heading: payload.heading,
+        isIdle: payload.is_idle,
+        idleDurationSeconds: payload.idle_duration_seconds,
+        recordedAt: payload.recorded_at,
       });
       return;
     }
@@ -153,55 +525,28 @@ async function persistPosition(
     throw new Error(error instanceof Error ? error.message : "Tracking persistence failed");
   }
 
-  await AsyncStorage.setItem(
-    TRACKING_LAST_LOCATION_KEY,
-    JSON.stringify({
-      latitude: loc.coords.latitude,
-      longitude: loc.coords.longitude,
-      timestamp: loc.timestamp ?? Date.now(),
-    })
-  );
-
   publishTrackingHeartbeat(vendorId, {
     trackingMode: options.trackingMode,
     lastPositionAt: timestampIso,
-  }).catch(() => undefined);
+  });
 }
 
 if (!taskDefined) {
   TaskManager.defineTask(
     TRACKING_TASK_NAME,
-    async ({
-      data,
-      error,
-    }: TaskManager.TaskManagerTaskBody<TrackingLocationBatch>) => {
-      if (error) {
-        console.warn("[Tracking] Background task error:", error.message);
-        return;
-      }
-
+    async ({ data, error }: TaskManager.TaskManagerTaskBody<TrackingLocationBatch>) => {
       const vendorId = await AsyncStorage.getItem(TRACKING_VENDOR_ID_KEY);
       if (!vendorId) {
         return;
       }
 
-      const locations = data?.locations ?? [];
-      for (const location of locations) {
-        try {
-          await persistPosition(vendorId, location, {
-            trackingMode: "background",
-          });
-        } catch (insertError) {
-          if (isExpectedAuthError(insertError)) {
-            return;
-          }
-
-          console.warn(
-            "[Tracking] Background position failed:",
-            insertError instanceof Error ? insertError.message : insertError
-          );
+      if (error) {
+        if (!isTransientLocationTaskError(error)) {
+          console.warn("[Tracking] Background task error:", getUnknownErrorMessage(error));
         }
       }
+
+      await processBackgroundLocationBatch(vendorId, data?.locations ?? []);
     }
   );
   taskDefined = true;
@@ -215,7 +560,7 @@ export function useVendorTracking(options: {
   const { session, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [trackingState, setTrackingState] = useState<
-    "background" | "foreground_only" | "denied" | "error" | null
+    "background" | "denied" | "error" | null
   >(null);
   const lastLocationRef = useRef<Location.LocationObject | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -223,6 +568,7 @@ export function useVendorTracking(options: {
   useEffect(() => {
     let foregroundSubscription: Location.LocationSubscription | null = null;
     let active = true;
+    const isActive = () => active;
 
     const stopHeartbeatLoop = () => {
       if (heartbeatTimerRef.current) {
@@ -240,63 +586,18 @@ export function useVendorTracking(options: {
       }
     };
 
-    const startHeartbeatLoop = (trackingMode: "background" | "foreground_only") => {
+    const startHeartbeatLoop = (trackingMode: "background") => {
       stopHeartbeatLoop();
 
-      heartbeatTimerRef.current = setInterval(async () => {
-        const heartbeatPayload = {
-          trackingMode,
-          lastPositionAt: lastLocationRef.current?.timestamp
-            ? new Date(lastLocationRef.current.timestamp).toISOString()
-            : null,
-        } as const;
-
-        if (!lastLocationRef.current) {
-          try {
-            const currentLocation = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            lastLocationRef.current = currentLocation;
-          } catch {
-            publishTrackingHeartbeat(vendorId!, heartbeatPayload).catch(
-              () => undefined
-            );
-            return;
-          }
-        }
-
-        try {
-          await persistPosition(vendorId!, lastLocationRef.current, {
-            force: true,
-            trackingMode,
-          });
-          if (active) {
-            setError(null);
-          }
-        } catch (heartbeatError) {
-          if (isExpectedAuthError(heartbeatError)) {
-            pauseTrackingNetwork();
-            if (active) {
-              setError(null);
-              setTrackingState(trackingMode);
-            }
-            return;
-          }
-
-          const nextError =
-            heartbeatError instanceof Error
-              ? heartbeatError.message
-              : "Tracking heartbeat error";
-          if (active) {
-            setError(nextError);
-            setTrackingState("error");
-          }
-          publishTrackingHeartbeat(vendorId!, {
-            trackingMode: "error",
-            lastError: nextError,
-            lastPositionAt: heartbeatPayload.lastPositionAt,
-          }).catch(() => undefined);
-        }
+      heartbeatTimerRef.current = setInterval(() => {
+        void runHeartbeatTick(vendorId!, trackingMode, {
+          active: isActive,
+          lastLocationRef,
+          pauseTrackingNetwork,
+          setError,
+          setTrackingState,
+          startHeartbeatLoop,
+        });
       }, TRACKING_HEARTBEAT_MS);
     };
 
@@ -314,152 +615,62 @@ export function useVendorTracking(options: {
 
     const startTracking = async () => {
       if (!enabled || !vendorId) {
-        if (active) {
-          setTrackingState(null);
-          setError(null);
-        }
-        await stopTrackingCompletely();
+        await resetTrackingLifecycle(stopTrackingCompletely, {
+          active: isActive,
+          lastLocationRef,
+          pauseTrackingNetwork,
+          setError,
+          setTrackingState,
+          startHeartbeatLoop,
+        });
         return;
       }
 
       if (loading) {
-        pauseTrackingNetwork();
-        if (active) {
-          setError(null);
-        }
+        pauseTrackingLifecycle({
+          active: isActive,
+          lastLocationRef,
+          pauseTrackingNetwork,
+          setError,
+          setTrackingState,
+          startHeartbeatLoop,
+        });
         return;
       }
 
       if (!session) {
-        pauseTrackingNetwork();
-        if (active) {
-          setError(null);
-        }
+        await resetTrackingLifecycle(stopTrackingCompletely, {
+          active: isActive,
+          lastLocationRef,
+          pauseTrackingNetwork,
+          setError,
+          setTrackingState,
+          startHeartbeatLoop,
+        });
         return;
       }
 
       try {
-        await AsyncStorage.setItem(TRACKING_VENDOR_ID_KEY, vendorId);
-
-        const { status: foregroundStatus } =
-          await Location.getForegroundPermissionsAsync();
-        if (foregroundStatus !== "granted") {
-          if (active) {
-            setTrackingState("denied");
-          }
-          publishTrackingHeartbeat(vendorId, {
-            trackingMode: "denied",
-            lastError: "Location permission not granted",
-          }).catch(() => undefined);
-          throw new Error("Location permission not granted");
-        }
-
-        const { status: backgroundStatus } =
-          await Location.getBackgroundPermissionsAsync();
-
-        if (backgroundStatus === "granted") {
-          if (active) {
-            setTrackingState("background");
-          }
-          const started = await Location.hasStartedLocationUpdatesAsync(
-            TRACKING_TASK_NAME
-          );
-
-          if (!started) {
-            await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
-              accuracy: Location.Accuracy.Highest,
-              timeInterval: TRACKING_INTERVAL_MS,
-              distanceInterval: TRACKING_MIN_DISPLACEMENT_M,
-              pausesUpdatesAutomatically: false,
-              showsBackgroundLocationIndicator: true,
-              foregroundService: {
-                notificationTitle: "Novus Field tracking ativo",
-                notificationBody: "Registrando localizacao do vendedor em campo.",
-              },
-            });
-          }
-
-          const currentLocation = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.High,
-          });
-          lastLocationRef.current = currentLocation;
-          await persistPosition(vendorId, currentLocation, {
-            trackingMode: "background",
-          });
-          startHeartbeatLoop("background");
-          if (active) {
-            setError(null);
-          }
+        const started = await initializeTrackingSession(vendorId, {
+          active: isActive,
+          lastLocationRef,
+          pauseTrackingNetwork,
+          setError,
+          setTrackingState,
+          startHeartbeatLoop,
+        });
+        if (!started) {
           return;
         }
-
-        if (active) {
-          setTrackingState("foreground_only");
-        }
-
-        foregroundSubscription = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.High,
-            timeInterval: TRACKING_INTERVAL_MS,
-            distanceInterval: TRACKING_MIN_DISPLACEMENT_M,
-          },
-          async (loc) => {
-            try {
-              lastLocationRef.current = loc;
-              await persistPosition(vendorId, loc, {
-                trackingMode: "foreground_only",
-              });
-              if (active) {
-                setError(null);
-                setTrackingState("foreground_only");
-              }
-            } catch (watchError) {
-              if (isExpectedAuthError(watchError)) {
-                pauseTrackingNetwork();
-                if (active) {
-                  setError(null);
-                  setTrackingState("foreground_only");
-                }
-                return;
-              }
-
-              if (active) {
-                setError(
-                  watchError instanceof Error
-                    ? watchError.message
-                    : "Tracking error"
-                );
-                setTrackingState("error");
-              }
-            }
-          }
-        );
-        startHeartbeatLoop("foreground_only");
       } catch (trackingError) {
-        if (isExpectedAuthError(trackingError)) {
-          pauseTrackingNetwork();
-          if (active) {
-            setError(null);
-          }
-          return;
-        }
-
-        if (active) {
-          const nextError =
-            trackingError instanceof Error
-              ? trackingError.message
-              : "Location tracking error";
-          setError(nextError);
-          setTrackingState((current) =>
-            current === "denied" ? current : "error"
-          );
-          if (vendorId) {
-            publishTrackingHeartbeat(vendorId, {
-              trackingMode: "error",
-              lastError: nextError,
-            }).catch(() => undefined);
-          }
-        }
+        await handleTrackingFailure(vendorId, trackingError, {
+          active: isActive,
+          lastLocationRef,
+          pauseTrackingNetwork,
+          setError,
+          setTrackingState,
+          startHeartbeatLoop,
+        });
       }
     };
 
@@ -469,7 +680,7 @@ export function useVendorTracking(options: {
       active = false;
       pauseTrackingNetwork();
 
-      if (!enabled || !vendorId) {
+      if (!enabled || !vendorId || !session) {
         stopTrackingCompletely().catch((stopError) => {
           console.warn(
             "[Tracking] Failed to stop:",

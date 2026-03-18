@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { deriveBackendWsUrl } from "./config-utils";
 
 type MobileEnv = {
   EXPO_PUBLIC_PROJECT_ID?: string;
@@ -49,11 +50,5 @@ export function resolveBackendApiUrl(): string {
 
 export function resolveBackendWsUrl(): string {
   const env = process.env as MobileEnv;
-  const explicit = env.EXPO_PUBLIC_WS_URL?.trim();
-  if (explicit) {
-    return explicit;
-  }
-
-  const apiUrl = resolveBackendApiUrl();
-  return apiUrl.endsWith("/api") ? apiUrl.slice(0, -4) : apiUrl;
+  return deriveBackendWsUrl(resolveBackendApiUrl(), env.EXPO_PUBLIC_WS_URL);
 }

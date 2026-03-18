@@ -13,11 +13,11 @@ import { useTheme } from "../contexts/ThemeContext";
 import type { ThemeColors } from "../theme/colors";
 
 interface BottomSheetModalProps {
-  visible: boolean;
-  title: string;
-  onRequestClose: () => void;
-  children: React.ReactNode;
-  contentStyle?: ViewStyle;
+  readonly visible: boolean;
+  readonly title: string;
+  readonly onRequestClose: () => void;
+  readonly children: React.ReactNode;
+  readonly contentStyle?: ViewStyle;
 }
 
 export default function BottomSheetModal({

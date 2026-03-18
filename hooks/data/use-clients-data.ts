@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createClient, fetchClients, type Client } from "../../lib/mobile-data";
+import {
+  createClient,
+  fetchClients,
+  updateClient,
+  type Client,
+} from "../../lib/mobile-data";
 import { mobileQueryKeys } from "./query-keys";
 
 export function useClientsData() {
@@ -21,6 +26,22 @@ export function useCreateClient() {
         }
         return [result.client, ...current];
       });
+      queryClient.invalidateQueries({
+        queryKey: mobileQueryKeys.dashboard(variables.userId),
+      });
+    },
+  });
+}
+
+export function useUpdateClient() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: updateClient,
+    onSuccess: (result, variables) => {
+      queryClient.setQueryData<Client[]>(mobileQueryKeys.clients, (current = []) =>
+        current.map((item) => (item.id === result.client.id ? result.client : item)),
+      );
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.dashboard(variables.userId),
       });

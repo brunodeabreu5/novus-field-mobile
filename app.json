@@ -34,7 +34,7 @@
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.anonymous.novusfield"
+      "package": "com.novusfield.mobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"

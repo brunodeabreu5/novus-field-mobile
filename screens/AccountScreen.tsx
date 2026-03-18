@@ -8,13 +8,402 @@ import {
   ActivityIndicator,
   Alert,
   Switch,
+  type StyleProp,
+  type TextStyle,
 } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { useDevicePermissions } from "../contexts/DevicePermissionsContext";
+import type { PermissionState } from "../hooks/use-device-permissions-state";
 import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
-import { useTrackingStatus } from "../providers/TrackingProvider";
+import { useTrackingStatus, type TrackingState } from "../providers/TrackingProvider";
 import { colors } from "../theme/colors";
+
+interface SecuritySectionProps {
+  readonly biometricAvailable: boolean;
+  readonly biometricEnrolled: boolean;
+  readonly biometricEnabled: boolean;
+  readonly biometricLabel: string;
+  readonly biometricUnlocking: boolean;
+  readonly onToggle: (value: boolean) => void;
+}
+
+function SecuritySection({
+  biometricAvailable,
+  biometricEnrolled,
+  biometricEnabled,
+  biometricLabel,
+  biometricUnlocking,
+  onToggle,
+}: SecuritySectionProps) {
+  let description = "Este dispositivo no admite autenticacion biometrica.";
+  if (biometricAvailable) {
+    if (biometricEnrolled) {
+      description = `Use ${biometricLabel} para desbloquear la sesion guardada en este dispositivo.`;
+    } else {
+      description = "Configure la biometria del dispositivo para activar esta opcion.";
+    }
+  }
+
+  return (
+    <View style={styles.testSection}>
+      <Text style={styles.testSectionTitle}>Seguridad</Text>
+      <View style={styles.settingRow}>
+        <View style={styles.settingInfo}>
+          <Text style={styles.settingTitle}>Autenticacion biometrica</Text>
+          <Text style={styles.settingDesc}>{description}</Text>
+        </View>
+        <Switch
+          value={biometricEnabled}
+          onValueChange={onToggle}
+          disabled={!biometricAvailable || !biometricEnrolled || biometricUnlocking}
+          trackColor={{ false: colors.border, true: colors.primary }}
+        />
+      </View>
+    </View>
+  );
+}
+
+interface DeviceSectionProps {
+  readonly locationPermission: PermissionState;
+  readonly backgroundLocationPermission: PermissionState;
+  readonly notificationPermission: PermissionState;
+  readonly expoPushToken: string | null;
+  readonly lastLocation: { lat: number; lng: number } | null;
+  readonly isExpoGo: boolean;
+  readonly isWeb: boolean;
+  readonly isLoading: boolean;
+  readonly lastError: string | null;
+  readonly trackingState: TrackingState;
+  readonly trackingError: string | null;
+  readonly refreshPermissions: () => Promise<void>;
+  readonly requestNotificationPermission: () => Promise<void>;
+}
+
+interface StatusCardProps {
+  readonly children: React.ReactNode;
+}
+
+function StatusCard({ children }: StatusCardProps) {
+  return <View style={styles.testCard}>{children}</View>;
+}
+
+interface GpsStatusCardProps {
+  readonly locationPermission: PermissionState;
+  readonly backgroundLocationPermission: PermissionState;
+  readonly lastLocation: { lat: number; lng: number } | null;
+  readonly isWeb: boolean;
+  readonly isLoading: boolean;
+}
+
+function GpsStatusCard({
+  locationPermission,
+  backgroundLocationPermission,
+  lastLocation,
+  isWeb,
+  isLoading,
+}: GpsStatusCardProps) {
+  let statusText = "Pendente";
+  let statusStyle: StyleProp<TextStyle> = styles.testValue;
+  let showCoordinates = false;
+
+  if (locationPermission === "granted" && backgroundLocationPermission === "granted") {
+    statusText = "OK";
+    statusStyle = styles.testValueSuccess;
+    showCoordinates = true;
+  } else if (locationPermission === "denied" || backgroundLocationPermission === "denied") {
+    statusText = "Bloqueado";
+    statusStyle = styles.testError;
+  }
+
+  if (isWeb) {
+    return (
+      <StatusCard>
+        <Text style={styles.testLabel}>GPS</Text>
+        <Text style={styles.testValue}>N/A (web)</Text>
+      </StatusCard>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <StatusCard>
+        <Text style={styles.testLabel}>GPS</Text>
+        <ActivityIndicator size="small" color={colors.primary} />
+      </StatusCard>
+    );
+  }
+
+  return (
+    <StatusCard>
+      <Text style={styles.testLabel}>GPS</Text>
+      <Text style={[styles.testValue, statusStyle]}>{statusText}</Text>
+      {showCoordinates && lastLocation ? (
+        <Text style={styles.testSubtext}>
+          {lastLocation.lat.toFixed(5)}, {lastLocation.lng.toFixed(5)}
+        </Text>
+      ) : null}
+      <Text style={styles.testSubtext}>
+        El rastreo es obligatorio para vendedores. Al iniciar sesion, la app
+        solicitara permisos de ubicacion y no continuara si el sistema los bloquea.
+      </Text>
+    </StatusCard>
+  );
+}
+
+interface BackgroundStatusCardProps {
+  readonly backgroundLocationPermission: PermissionState;
+}
+
+function BackgroundStatusCard({
+  backgroundLocationPermission,
+}: BackgroundStatusCardProps) {
+  let statusText = "Pendente";
+  let statusStyle: StyleProp<TextStyle> = styles.testValue;
+
+  if (backgroundLocationPermission === "granted") {
+    statusText = "Autorizado";
+    statusStyle = styles.testValueSuccess;
+  } else if (backgroundLocationPermission === "denied") {
+    statusText = "Negado";
+    statusStyle = styles.testError;
+  }
+
+  let description =
+    "Sin este permiso, el vendedor quedara bloqueado y no podra seguir reportando ubicacion.";
+  if (backgroundLocationPermission === "granted") {
+    description = "El rastreo queda activo aunque la app pase a segundo plano.";
+  }
+
+  return (
+    <StatusCard>
+      <Text style={styles.testLabel}>GPS en background</Text>
+      <Text style={[styles.testValue, statusStyle]}>{statusText}</Text>
+      <Text style={styles.testSubtext}>{description}</Text>
+    </StatusCard>
+  );
+}
+
+interface TrackingStatusCardProps {
+  readonly trackingState: TrackingState;
+  readonly trackingError: string | null;
+}
+
+function TrackingStatusCard({
+  trackingState,
+  trackingError,
+}: TrackingStatusCardProps) {
+  let statusText = "No aplica";
+  let statusStyle: StyleProp<TextStyle> = styles.testValue;
+
+  if (trackingState === "background") {
+    statusText = "Activo en background";
+    statusStyle = styles.testValueSuccess;
+  } else if (trackingState === "denied") {
+    statusText = "Bloqueado";
+    statusStyle = styles.testError;
+  } else if (trackingState === "error") {
+    statusText = "Error de rastreo";
+    statusStyle = styles.testError;
+  }
+
+  return (
+    <StatusCard>
+      <Text style={styles.testLabel}>Estado del rastreo</Text>
+      <Text style={[styles.testValue, statusStyle]}>{statusText}</Text>
+      {trackingState === "denied" ? (
+        <Text style={styles.testSubtext}>
+          El sistema no concedio el permiso requerido. El vendedor no seguira
+          transmitiendo ubicacion hasta autorizarlo.
+        </Text>
+      ) : null}
+      {trackingError ? <Text style={styles.testSubtext}>{trackingError}</Text> : null}
+    </StatusCard>
+  );
+}
+
+interface NotificationStatusCardProps {
+  readonly notificationPermission: PermissionState;
+  readonly expoPushToken: string | null;
+  readonly isExpoGo: boolean;
+  readonly isWeb: boolean;
+  readonly isLoading: boolean;
+  readonly onRequestNotificationPermission: () => Promise<void>;
+}
+
+interface NotificationBodyProps {
+  readonly notificationPermission: PermissionState;
+  readonly expoPushToken: string | null;
+  readonly isExpoGo: boolean;
+  readonly isWeb: boolean;
+  readonly isLoading: boolean;
+  readonly onRequestNotificationPermission: () => Promise<void>;
+}
+
+function NotificationBody({
+  notificationPermission,
+  expoPushToken,
+  isExpoGo,
+  isWeb,
+  isLoading,
+  onRequestNotificationPermission,
+}: NotificationBodyProps) {
+  let statusText = "Pendente";
+  let statusStyle: StyleProp<TextStyle> = styles.testValue;
+  let statusDetails: React.ReactNode = null;
+
+  if (notificationPermission === "granted") {
+    statusText = "OK";
+    statusStyle = styles.testValueSuccess;
+    if (expoPushToken) {
+      statusDetails = (
+        <Text style={styles.testSubtext} numberOfLines={2}>
+          Token registrado
+        </Text>
+      );
+    } else {
+      statusDetails = (
+        <Text style={styles.testSubtext}>
+          Permissao concedida. Aguardando registro do token.
+        </Text>
+      );
+    }
+  } else if (notificationPermission === "denied") {
+    statusText = "Negado";
+    statusStyle = styles.testError;
+    statusDetails = (
+      <TouchableOpacity
+        style={[styles.testBtn, styles.testBtnPrimary]}
+        onPress={() => {
+          void onRequestNotificationPermission();
+        }}
+        disabled={isLoading}
+      >
+        <Text style={styles.testBtnTextPrimary}>Ativar notificacoes</Text>
+      </TouchableOpacity>
+    );
+  } else {
+    statusDetails = (
+      <TouchableOpacity
+        style={[styles.testBtn, styles.testBtnPrimary]}
+        onPress={() => {
+          void onRequestNotificationPermission();
+        }}
+        disabled={isLoading}
+      >
+        <Text style={styles.testBtnTextPrimary}>Ativar notificacoes</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  if (isWeb) {
+    return <Text style={styles.testValue}>N/A (web)</Text>;
+  }
+
+  if (isExpoGo) {
+    return (
+      <>
+        <Text style={styles.testValue}>Expo Go</Text>
+        <Text style={styles.testSubtext}>Push indisponivel. Use development build.</Text>
+      </>
+    );
+  }
+
+  if (isLoading) {
+    return <ActivityIndicator size="small" color={colors.primary} />;
+  }
+
+  return (
+    <>
+      <Text style={[styles.testValue, statusStyle]}>{statusText}</Text>
+      {statusDetails}
+    </>
+  );
+}
+
+function NotificationStatusCard({
+  notificationPermission,
+  expoPushToken,
+  isExpoGo,
+  isWeb,
+  isLoading,
+  onRequestNotificationPermission,
+}: NotificationStatusCardProps) {
+  return (
+    <StatusCard>
+      <Text style={styles.testLabel}>Notificacoes</Text>
+      <NotificationBody
+        notificationPermission={notificationPermission}
+        expoPushToken={expoPushToken}
+        isExpoGo={isExpoGo}
+        isWeb={isWeb}
+        isLoading={isLoading}
+        onRequestNotificationPermission={onRequestNotificationPermission}
+      />
+    </StatusCard>
+  );
+}
+
+function DeviceSection({
+  locationPermission,
+  backgroundLocationPermission,
+  notificationPermission,
+  expoPushToken,
+  lastLocation,
+  isExpoGo,
+  isWeb,
+  isLoading,
+  lastError,
+  trackingState,
+  trackingError,
+  refreshPermissions,
+  requestNotificationPermission,
+}: DeviceSectionProps) {
+  return (
+    <View style={styles.testSection}>
+      <Text style={styles.testSectionTitle}>Dispositivo</Text>
+      <GpsStatusCard
+        locationPermission={locationPermission}
+        backgroundLocationPermission={backgroundLocationPermission}
+        lastLocation={lastLocation}
+        isWeb={isWeb}
+        isLoading={isLoading}
+      />
+      <BackgroundStatusCard
+        backgroundLocationPermission={backgroundLocationPermission}
+      />
+      <TrackingStatusCard
+        trackingState={trackingState}
+        trackingError={trackingError}
+      />
+      <NotificationStatusCard
+        notificationPermission={notificationPermission}
+        expoPushToken={expoPushToken}
+        isExpoGo={isExpoGo}
+        isWeb={isWeb}
+        isLoading={isLoading}
+        onRequestNotificationPermission={requestNotificationPermission}
+      />
+
+      {lastError ? (
+        <View style={styles.testCard}>
+          <Text style={styles.testLabel}>Ultimo erro</Text>
+          <Text style={styles.testError}>{lastError}</Text>
+        </View>
+      ) : null}
+
+      <TouchableOpacity
+        style={[styles.testBtn, styles.testBtnPrimary]}
+        onPress={() => {
+          void refreshPermissions();
+        }}
+        disabled={isLoading}
+      >
+        <Text style={styles.testBtnTextPrimary}>Atualizar status</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 export default function AccountScreen() {
   const {
@@ -41,8 +430,6 @@ export default function AccountScreen() {
     isLoading,
     lastError,
     refreshPermissions,
-    requestLocationPermission,
-    requestBackgroundLocationPermission,
     requestNotificationPermission,
   } = useDevicePermissions();
   const { trackingState, trackingError } = useTrackingStatus();
@@ -80,7 +467,9 @@ export default function AccountScreen() {
       {
         text: "Cerrar sesion",
         style: "destructive",
-        onPress: () => signOut(),
+        onPress: () => {
+          void signOut();
+        },
       },
     ]);
   };
@@ -103,26 +492,6 @@ export default function AccountScreen() {
 
     await disableBiometrics();
   };
-
-  const trackingStatusLabel =
-    trackingState === "background"
-      ? "Activo en background"
-      : trackingState === "foreground_only"
-        ? "Activo solo con la app abierta"
-        : trackingState === "denied"
-          ? "Permiso denegado"
-          : trackingState === "error"
-            ? "Error de rastreo"
-            : "No aplica";
-
-  const trackingStatusStyle =
-    trackingState === "background"
-      ? styles.testValueSuccess
-      : trackingState === "foreground_only"
-        ? styles.testValueWarning
-        : trackingState === "denied" || trackingState === "error"
-          ? styles.testError
-          : styles.testValue;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -187,187 +556,30 @@ export default function AccountScreen() {
         </>
       )}
 
-      <View style={styles.testSection}>
-        <Text style={styles.testSectionTitle}>Seguridad</Text>
+      <SecuritySection
+        biometricAvailable={biometricAvailable}
+        biometricEnrolled={biometricEnrolled}
+        biometricEnabled={biometricEnabled}
+        biometricLabel={biometricLabel}
+        biometricUnlocking={biometricUnlocking}
+        onToggle={handleBiometricToggle}
+      />
 
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={styles.settingTitle}>Autenticacion biometrica</Text>
-            <Text style={styles.settingDesc}>
-              {biometricAvailable
-                ? biometricEnrolled
-                  ? `Use ${biometricLabel} para desbloquear la sesion guardada en este dispositivo.`
-                  : "Configure la biometria del dispositivo para activar esta opcion."
-                : "Este dispositivo no admite autenticacion biometrica."}
-            </Text>
-          </View>
-          <Switch
-            value={biometricEnabled}
-            onValueChange={handleBiometricToggle}
-            disabled={!biometricAvailable || !biometricEnrolled || biometricUnlocking}
-            trackColor={{ false: colors.border, true: colors.primary }}
-          />
-        </View>
-      </View>
-
-      <View style={styles.testSection}>
-        <Text style={styles.testSectionTitle}>Dispositivo</Text>
-
-        <View style={styles.testCard}>
-          <Text style={styles.testLabel}>GPS</Text>
-          {isWeb ? (
-            <Text style={styles.testValue}>N/A (web)</Text>
-          ) : isLoading ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : locationPermission === "granted" ? (
-            <>
-              <Text style={[styles.testValue, styles.testValueSuccess]}>OK</Text>
-              {lastLocation ? (
-                <Text style={styles.testSubtext}>
-                  {lastLocation.lat.toFixed(5)}, {lastLocation.lng.toFixed(5)}
-                </Text>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <Text
-                style={
-                  locationPermission === "denied"
-                    ? styles.testError
-                    : styles.testValue
-                }
-              >
-                {locationPermission === "denied" ? "Negado" : "Pendente"}
-              </Text>
-              <TouchableOpacity
-                style={[styles.testBtn, styles.testBtnPrimary]}
-                onPress={requestLocationPermission}
-                disabled={isLoading}
-              >
-                <Text style={styles.testBtnTextPrimary}>Ativar GPS</Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-
-        <View style={styles.testCard}>
-          <Text style={styles.testLabel}>GPS en background</Text>
-          <Text
-            style={
-              backgroundLocationPermission === "granted"
-                ? [styles.testValue, styles.testValueSuccess]
-                : backgroundLocationPermission === "denied"
-                  ? styles.testError
-                  : styles.testValue
-            }
-          >
-            {backgroundLocationPermission === "granted"
-              ? "Autorizado"
-              : backgroundLocationPermission === "denied"
-                ? "Negado"
-                : "Pendente"}
-          </Text>
-          {backgroundLocationPermission !== "granted" ? (
-            <>
-              <Text style={styles.testSubtext}>
-                Sin este permiso, el historial solo se completa cuando la app esta
-                abierta.
-              </Text>
-              <TouchableOpacity
-                style={[styles.testBtn, styles.testBtnPrimary]}
-                onPress={requestBackgroundLocationPermission}
-                disabled={isLoading}
-              >
-                <Text style={styles.testBtnTextPrimary}>Ativar em background</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <Text style={styles.testSubtext}>
-              Para el rastreo mas estable posible, deje la app autorizada en
-              segundo plano y evite cerrarla a la fuerza.
-            </Text>
-          )}
-        </View>
-
-        <View style={styles.testCard}>
-          <Text style={styles.testLabel}>Estado del rastreo</Text>
-          <Text style={[styles.testValue, trackingStatusStyle]}>
-            {trackingStatusLabel}
-          </Text>
-          {trackingState === "foreground_only" ? (
-            <Text style={styles.testSubtext}>
-              El rastreo sigue activo, pero fuera del primer plano puede faltar
-              parte del recorrido.
-            </Text>
-          ) : null}
-          {trackingError ? (
-            <Text style={styles.testSubtext}>{trackingError}</Text>
-          ) : null}
-        </View>
-
-        <View style={styles.testCard}>
-          <Text style={styles.testLabel}>Notificacoes</Text>
-          {isWeb ? (
-            <Text style={styles.testValue}>N/A (web)</Text>
-          ) : isExpoGo ? (
-            <>
-              <Text style={styles.testValue}>Expo Go</Text>
-              <Text style={styles.testSubtext}>
-                Push indisponivel. Use development build.
-              </Text>
-            </>
-          ) : isLoading ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : notificationPermission === "granted" ? (
-            <>
-              <Text style={[styles.testValue, styles.testValueSuccess]}>OK</Text>
-              {expoPushToken ? (
-                <Text style={styles.testSubtext} numberOfLines={2}>
-                  Token registrado
-                </Text>
-              ) : (
-                <Text style={styles.testSubtext}>
-                  Permissao concedida. Aguardando registro do token.
-                </Text>
-              )}
-            </>
-          ) : (
-            <>
-              <Text
-                style={
-                  notificationPermission === "denied"
-                    ? styles.testError
-                    : styles.testValue
-                }
-              >
-                {notificationPermission === "denied" ? "Negado" : "Pendente"}
-              </Text>
-              <TouchableOpacity
-                style={[styles.testBtn, styles.testBtnPrimary]}
-                onPress={requestNotificationPermission}
-                disabled={isLoading}
-              >
-                <Text style={styles.testBtnTextPrimary}>Ativar notificacoes</Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-
-        {lastError ? (
-          <View style={styles.testCard}>
-            <Text style={styles.testLabel}>Ultimo erro</Text>
-            <Text style={styles.testError}>{lastError}</Text>
-          </View>
-        ) : null}
-
-        <TouchableOpacity
-          style={[styles.testBtn, styles.testBtnPrimary]}
-          onPress={refreshPermissions}
-          disabled={isLoading}
-        >
-          <Text style={styles.testBtnTextPrimary}>Atualizar status</Text>
-        </TouchableOpacity>
-      </View>
+      <DeviceSection
+        locationPermission={locationPermission}
+        backgroundLocationPermission={backgroundLocationPermission}
+        notificationPermission={notificationPermission}
+        expoPushToken={expoPushToken}
+        lastLocation={lastLocation}
+        isExpoGo={isExpoGo}
+        isWeb={isWeb}
+        isLoading={isLoading}
+        lastError={lastError}
+        trackingState={trackingState}
+        trackingError={trackingError}
+        refreshPermissions={refreshPermissions}
+        requestNotificationPermission={requestNotificationPermission}
+      />
 
       <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
         <Text style={styles.signOutText}>Cerrar sesion</Text>

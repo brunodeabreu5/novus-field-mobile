@@ -46,37 +46,48 @@ export default function DrawerMenu() {
   const drawerWidth = Math.min(width * 0.85, 380);
   const slideAnim = React.useRef(new Animated.Value(-drawerWidth)).current;
   const backdropOpacity = React.useRef(new Animated.Value(0)).current;
+  const animationRef = React.useRef<Animated.CompositeAnimation | null>(null);
   const activeRouteName = getActiveRouteName(navigation.getState());
 
   useEffect(() => {
-    if (isOpen) {
-      Animated.parallel([
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 65,
-          friction: 14,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: -drawerWidth,
-          duration: 260,
-          useNativeDriver: true,
-        }),
-        Animated.timing(backdropOpacity, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
+    animationRef.current?.stop();
+
+    const animation = isOpen
+      ? Animated.parallel([
+          Animated.spring(slideAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+            tension: 65,
+            friction: 14,
+          }),
+          Animated.timing(backdropOpacity, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ])
+      : Animated.parallel([
+          Animated.timing(slideAnim, {
+            toValue: -drawerWidth,
+            duration: 260,
+            useNativeDriver: true,
+          }),
+          Animated.timing(backdropOpacity, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]);
+
+    animationRef.current = animation;
+    animation.start();
+
+    return () => {
+      animation.stop();
+      if (animationRef.current === animation) {
+        animationRef.current = null;
+      }
+    };
   }, [backdropOpacity, drawerWidth, isOpen, slideAnim]);
 
   const handleNav = (screenName: DrawerItemName) => {

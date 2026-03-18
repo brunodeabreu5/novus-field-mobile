@@ -79,7 +79,7 @@ export default function ChargesScreen() {
   const { data: clients = [] } = useClientsData();
   const createChargeMutation = useCreateCharge();
   const [modalVisible, setModalVisible] = useState(false);
-  const [clientPickerVisible, setClientPickerVisible] = useState(false);
+  const [activePicker, setActivePicker] = useState<"client" | null>(null);
   const [search, setSearch] = useState("");
   const [form, setForm] = useState({
     clientId: "",
@@ -107,6 +107,7 @@ export default function ChargesScreen() {
       dueDate: "",
       notes: "",
     });
+    setActivePicker(null);
     setModalVisible(true);
   };
 
@@ -116,8 +117,19 @@ export default function ChargesScreen() {
       clientId: client.id,
       clientName: client.name,
     }));
-    setClientPickerVisible(false);
+    setActivePicker(null);
   };
+
+  const handleModalRequestClose = () => {
+    if (activePicker) {
+      setActivePicker(null);
+      return;
+    }
+
+    setModalVisible(false);
+  };
+
+  const modalTitle = activePicker === "client" ? "Seleccionar Cliente" : "Nuevo Cobro";
 
   const saveCharge = async () => {
     if (!user || !profile || !form.clientName.trim()) {
@@ -213,82 +225,86 @@ export default function ChargesScreen() {
 
       <BottomSheetModal
         visible={modalVisible}
-        title="Nuevo Cobro"
-        onRequestClose={() => setModalVisible(false)}
+        title={modalTitle}
+        onRequestClose={handleModalRequestClose}
         contentStyle={styles.modal}
       >
-        <ScrollView>
-          <Text style={styles.label}>Cliente *</Text>
-          <TouchableOpacity
-            style={styles.input}
-            onPress={() => setClientPickerVisible(true)}
-          >
-            <Text
-              style={form.clientName ? styles.inputText : styles.placeholderText}
-            >
-              {form.clientName || "Seleccione un cliente"}
-            </Text>
-          </TouchableOpacity>
-          <FormField
-            label="Monto (Gs.)"
-            placeholder="Ej: 150000"
-            value={form.amount}
-            onChangeText={(text) =>
-              setForm((current) => ({
-                ...current,
-                amount: text.replace(/\D/g, ""),
-              }))
-            }
-            keyboardType="number-pad"
-          />
-          <FormField
-            label="Fecha de vencimiento (opcional)"
-            placeholder="YYYY-MM-DD"
-            value={form.dueDate}
-            onChangeText={(text) =>
-              setForm((current) => ({ ...current, dueDate: text }))
-            }
-          />
-          <FormField
-            label="Notas"
-            placeholder="Notas..."
-            value={form.notes}
-            onChangeText={(text) =>
-              setForm((current) => ({ ...current, notes: text }))
-            }
-            multiline
-          />
-          <FormActions
-            isLoading={createChargeMutation.isPending}
-            submitLabel="Crear Cobro"
-            onCancel={() => setModalVisible(false)}
-            onSubmit={saveCharge}
-          />
-        </ScrollView>
-      </BottomSheetModal>
-      <BottomSheetModal
-        visible={clientPickerVisible}
-        title="Seleccionar Cliente"
-        onRequestClose={() => setClientPickerVisible(false)}
-      >
-        <FlatList
-          data={clients}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
+        {activePicker === "client" ? (
+          <>
             <TouchableOpacity
-              style={styles.clientItem}
-              onPress={() => handleSelectClient(item)}
+              style={styles.pickerBackButton}
+              onPress={() => setActivePicker(null)}
             >
-              <Text style={styles.clientItemText}>{item.name}</Text>
+              <Text style={styles.pickerBackButtonText}>Volver</Text>
             </TouchableOpacity>
-          )}
-          ListEmptyComponent={
-            <EmptyState
-              title="No hay clientes"
-              message="No se encontraron clientes. Puede crear uno nuevo en la pantalla de clientes."
+            <View style={styles.clientList}>
+              {clients.map((client) => (
+                <TouchableOpacity
+                  key={client.id}
+                  style={styles.clientItem}
+                  onPress={() => handleSelectClient(client)}
+                >
+                  <Text style={styles.clientItemText}>{client.name}</Text>
+                </TouchableOpacity>
+              ))}
+              {!clients.length ? (
+                <EmptyState
+                  title="No hay clientes"
+                  message="No se encontraron clientes. Puede crear uno nuevo en la pantalla de clientes."
+                />
+              ) : null}
+            </View>
+          </>
+        ) : (
+          <ScrollView>
+            <Text style={styles.label}>Cliente *</Text>
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => setActivePicker("client")}
+            >
+              <Text
+                style={form.clientName ? styles.inputText : styles.placeholderText}
+              >
+                {form.clientName || "Seleccione un cliente"}
+              </Text>
+            </TouchableOpacity>
+            <FormField
+              label="Monto (Gs.)"
+              placeholder="Ej: 150000"
+              value={form.amount}
+              onChangeText={(text) =>
+                setForm((current) => ({
+                  ...current,
+                  amount: text.replace(/\D/g, ""),
+                }))
+              }
+              keyboardType="number-pad"
             />
-          }
-        />
+            <FormField
+              label="Fecha de vencimiento (opcional)"
+              placeholder="YYYY-MM-DD"
+              value={form.dueDate}
+              onChangeText={(text) =>
+                setForm((current) => ({ ...current, dueDate: text }))
+              }
+            />
+            <FormField
+              label="Notas"
+              placeholder="Notas..."
+              value={form.notes}
+              onChangeText={(text) =>
+                setForm((current) => ({ ...current, notes: text }))
+              }
+              multiline
+            />
+            <FormActions
+              isLoading={createChargeMutation.isPending}
+              submitLabel="Crear Cobro"
+              onCancel={() => setModalVisible(false)}
+              onSubmit={saveCharge}
+            />
+          </ScrollView>
+        )}
       </BottomSheetModal>
     </View>
   );
@@ -386,9 +402,23 @@ const useStyles = (colors: ThemeColors) =>
           borderBottomWidth: 1,
           borderBottomColor: colors.border,
         },
+        clientList: {
+          gap: 4,
+        },
         clientItemText: {
           fontSize: 16,
           color: colors.foreground,
+        },
+        pickerBackButton: {
+          alignSelf: "flex-start",
+          paddingHorizontal: 4,
+          paddingVertical: 6,
+          marginBottom: 12,
+        },
+        pickerBackButtonText: {
+          color: colors.primary,
+          fontSize: 14,
+          fontWeight: "600",
         },
       }),
     [colors]

@@ -16,7 +16,11 @@ import MapView, {
   type Region,
 } from "react-native-maps";
 import { useAuth } from "../contexts/AuthContext";
-import { useClientsData, useCreateClient } from "../hooks/use-mobile-data";
+import {
+  useClientsData,
+  useCreateClient,
+  useUpdateClient,
+} from "../hooks/use-mobile-data";
 import { useDevicePermissions } from "../contexts/DevicePermissionsContext";
 import type { Client } from "../lib/mobile-data";
 import BottomSheetModal from "../components/BottomSheetModal";
@@ -54,15 +58,62 @@ const DEFAULT_REGION: Region = {
   longitudeDelta: 0.02,
 };
 
+const formatCoordinate = (value: number | null) => {
+  if (value === null) {
+    return "";
+  }
+
+  return value.toFixed(6);
+};
+
+const buildClientForm = (client: Client) => ({
+  name: client.name ?? "",
+  document: client.document ?? "",
+  phone: client.phone ?? "",
+  email: client.email ?? "",
+  address: client.address ?? "",
+  notes: client.notes ?? "",
+  latitude: formatCoordinate(client.latitude),
+  longitude: formatCoordinate(client.longitude),
+});
+
+const buildRegionFromClient = (client: Client): Region => ({
+  latitude: client.latitude ?? DEFAULT_REGION.latitude,
+  longitude: client.longitude ?? DEFAULT_REGION.longitude,
+  latitudeDelta: DEFAULT_REGION.latitudeDelta,
+  longitudeDelta: DEFAULT_REGION.longitudeDelta,
+});
+
+async function resolveCurrentLocation() {
+  try {
+    const lastKnown = await Location.getLastKnownPositionAsync({});
+    if (lastKnown) {
+      return lastKnown;
+    }
+  } catch {
+    // Ignore and fall back to a live fix.
+  }
+
+  try {
+    return await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    });
+  } catch {
+    return null;
+  }
+}
+
 export default function ClientsScreen() {
   const { user } = useAuth();
   const { data: clients = [], isLoading } = useClientsData();
   const createClientMutation = useCreateClient();
+  const updateClientMutation = useUpdateClient();
   const {
     locationPermission,
     requestLocationPermission,
   } = useDevicePermissions();
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [search, setSearch] = useState("");
   const [gpsLoading, setGpsLoading] = useState(false);
   const [addressSearching, setAddressSearching] = useState(false);
@@ -83,9 +134,24 @@ export default function ClientsScreen() {
   );
 
   const openModal = () => {
+    setEditingClient(null);
     setForm(emptyForm);
     setPickerRegion(DEFAULT_REGION);
     setModalVisible(true);
+  };
+
+  const openEditModal = (client: Client) => {
+    setEditingClient(client);
+    setForm(buildClientForm(client));
+    setPickerRegion(buildRegionFromClient(client));
+    setModalVisible(true);
+  };
+
+  const closeModal = () => {
+    setModalVisible(false);
+    setEditingClient(null);
+    setForm(emptyForm);
+    setPickerRegion(DEFAULT_REGION);
   };
 
   const updateLocation = (
@@ -140,9 +206,12 @@ export default function ClientsScreen() {
         return;
       }
 
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+      const position = await resolveCurrentLocation();
+      if (!position) {
+        setPickerRegion(DEFAULT_REGION);
+        return;
+      }
+
       updateLocation(position.coords.latitude, position.coords.longitude);
     } catch {
       setPickerRegion(DEFAULT_REGION);
@@ -176,9 +245,15 @@ export default function ClientsScreen() {
         return;
       }
 
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      const position = await resolveCurrentLocation();
+
+      if (!position) {
+        Alert.alert(
+          "GPS no disponible",
+          "No se pudo obtener una ubicacion ahora. Puede mover el pin manualmente."
+        );
+        return;
+      }
 
       updateLocation(position.coords.latitude, position.coords.longitude);
     } catch (error) {
@@ -281,18 +356,33 @@ export default function ClientsScreen() {
     }
 
     try {
-      await createClientMutation.mutateAsync({
-        userId: user.id,
-        name: form.name,
-        document: form.document,
-        phone: form.phone,
-        email: form.email,
-        address: form.address,
-        notes: form.notes,
-        latitude,
-        longitude,
-      });
-      setModalVisible(false);
+      if (editingClient) {
+        await updateClientMutation.mutateAsync({
+          userId: user.id,
+          client: editingClient,
+          name: form.name,
+          document: form.document,
+          phone: form.phone,
+          email: form.email,
+          address: form.address,
+          notes: form.notes,
+          latitude,
+          longitude,
+        });
+      } else {
+        await createClientMutation.mutateAsync({
+          userId: user.id,
+          name: form.name,
+          document: form.document,
+          phone: form.phone,
+          email: form.email,
+          address: form.address,
+          notes: form.notes,
+          latitude,
+          longitude,
+        });
+      }
+      closeModal();
     } catch (error) {
       Alert.alert(
         "Error",
@@ -318,22 +408,15 @@ export default function ClientsScreen() {
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.name}>{item.name}</Text>
-        {item.latitude != null && item.longitude != null ? (
-          <View style={styles.locationBadge}>
-            <Text style={styles.locationBadgeText}>Ubicacion guardada</Text>
-          </View>
-        ) : null}
+        <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
+          <Text style={styles.editBtnText}>Editar</Text>
+        </TouchableOpacity>
       </View>
       {item.phone ? <Text style={styles.meta}>Tel: {item.phone}</Text> : null}
       {item.document ? <Text style={styles.meta}>RUC/DOC: {item.document}</Text> : null}
       {item.address ? (
         <Text style={styles.meta} numberOfLines={1}>
           Dir: {item.address}
-        </Text>
-      ) : null}
-      {item.latitude != null && item.longitude != null ? (
-        <Text style={styles.meta}>
-          GPS: {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}
         </Text>
       ) : null}
     </View>
@@ -368,8 +451,8 @@ export default function ClientsScreen() {
 
       <BottomSheetModal
         visible={modalVisible}
-        title="Nuevo Cliente"
-        onRequestClose={() => setModalVisible(false)}
+        title={editingClient ? "Editar Cliente" : "Nuevo Cliente"}
+        onRequestClose={closeModal}
         contentStyle={styles.modal}
       >
         <FormField
@@ -413,7 +496,11 @@ export default function ClientsScreen() {
           <TouchableOpacity
             style={[styles.actionButton, styles.primaryAction]}
             onPress={handleGetGPS}
-            disabled={gpsLoading || createClientMutation.isPending}
+            disabled={
+              gpsLoading ||
+              createClientMutation.isPending ||
+              updateClientMutation.isPending
+            }
           >
             <Text style={styles.primaryActionText}>
               {gpsLoading ? "Obteniendo GPS..." : "Usar mi ubicacion"}
@@ -422,7 +509,11 @@ export default function ClientsScreen() {
           <TouchableOpacity
             style={styles.actionButton}
             onPress={handleAddressSearch}
-            disabled={addressSearching || createClientMutation.isPending}
+            disabled={
+              addressSearching ||
+              createClientMutation.isPending ||
+              updateClientMutation.isPending
+            }
           >
             <Text style={styles.actionText}>
               {addressSearching ? "Buscando..." : "Buscar por direccion"}
@@ -478,9 +569,9 @@ export default function ClientsScreen() {
         />
 
         <FormActions
-          isLoading={createClientMutation.isPending}
-          submitLabel="Guardar"
-          onCancel={() => setModalVisible(false)}
+          isLoading={createClientMutation.isPending || updateClientMutation.isPending}
+          submitLabel={editingClient ? "Actualizar" : "Guardar"}
+          onCancel={closeModal}
           onSubmit={handleSaveClient}
         />
       </BottomSheetModal>
@@ -534,16 +625,18 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 16, fontWeight: "600", color: colors.foreground, flex: 1 },
   meta: { fontSize: 13, color: colors.mutedForeground, marginTop: 4 },
-  locationBadge: {
-    backgroundColor: colors.successMuted,
+  editBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
   },
-  locationBadgeText: {
-    color: colors.success,
-    fontSize: 11,
-    fontWeight: "700",
+  editBtnText: {
+    color: colors.foreground,
+    fontSize: 12,
+    fontWeight: "600",
   },
   modal: {
     maxHeight: "90%",

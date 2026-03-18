@@ -8,7 +8,7 @@ import { getExpoProjectId } from "../lib/config";
 
 export type PermissionState = "unknown" | "granted" | "denied" | "unsupported";
 
-const isExpoGo = Constants.appOwnership === "expo";
+const isExpoGo = Constants.executionEnvironment === "storeClient";
 const isWeb = Platform.OS === "web";
 
 function mapPermissionStatus(
@@ -28,8 +28,12 @@ async function registerExpoPushToken(token: string) {
 }
 
 function isExpoProjectIdConfigurationError(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  let message = "";
+  if (error instanceof Error) {
+    message = error.message;
+  } else if (typeof error === "string") {
+    message = error;
+  }
 
   return (
     message.includes("VALIDATION_ERROR") ||
@@ -74,11 +78,32 @@ export function useDevicePermissionsState(sessionActive: boolean) {
   const loadCurrentLocation = useCallback(async () => {
     if (isWeb) {
       setLastLocation(null);
-      return;
+      return false;
     }
 
-    const { coords } = await Location.getCurrentPositionAsync({});
-    setLastLocation({ lat: coords.latitude, lng: coords.longitude });
+    try {
+      const lastKnown = await Location.getLastKnownPositionAsync({});
+      if (lastKnown) {
+        setLastLocation({
+          lat: lastKnown.coords.latitude,
+          lng: lastKnown.coords.longitude,
+        });
+        return true;
+      }
+    } catch {
+      // Ignore and fall through to a fresh location request.
+    }
+
+    try {
+      const { coords } = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setLastLocation({ lat: coords.latitude, lng: coords.longitude });
+      return true;
+    } catch {
+      setLastLocation(null);
+      return false;
+    }
   }, []);
 
   const refreshPermissions = useCallback(async () => {

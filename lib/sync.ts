@@ -3,6 +3,7 @@ import {
   type ChargeCreateAction,
   type ChatSendAction,
   type ClientCreateAction,
+  type ClientUpdateAction,
   offlineStorage,
   type CheckInAction,
   type CheckOutAction,
@@ -72,14 +73,14 @@ export async function syncQueuedActions(): Promise<number> {
 export function isOfflineLikeError(error: unknown): boolean {
   if (!error) return false;
 
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : typeof error === "object" && error && "message" in error
-          ? String(error.message)
-          : "";
+  let message = "";
+  if (error instanceof Error) {
+    message = error.message;
+  } else if (typeof error === "string") {
+    message = error;
+  } else if (typeof error === "object" && error && "message" in error) {
+    message = String(error.message);
+  }
 
   if (!message) return false;
 
@@ -94,25 +95,46 @@ export function isOfflineLikeError(error: unknown): boolean {
 }
 
 async function syncAction(action: QueuedAction): Promise<boolean> {
-  switch (action.type) {
-    case "check_in":
-      return syncCheckIn(action);
-    case "check_out":
-      return syncCheckOut(action);
-    case "visit_create":
-      return syncVisitCreate(action);
-    case "manual_visit_create":
-      return syncManualVisitCreate(action);
-    case "client_create":
-      return syncClientCreate(action);
-    case "charge_create":
-      return syncChargeCreate(action);
-    case "chat_send":
-      return syncChatSend(action);
-    case "vendor_position":
-      return syncVendorPosition(action);
-    default:
+  try {
+    switch (action.type) {
+      case "check_in":
+        await syncCheckIn(action);
+        return true;
+      case "check_out":
+        await syncCheckOut(action);
+        return true;
+      case "visit_create":
+        await syncVisitCreate(action);
+        return true;
+      case "manual_visit_create":
+        await syncManualVisitCreate(action);
+        return true;
+      case "client_create":
+        await syncClientCreate(action);
+        return true;
+      case "client_update":
+        await syncClientUpdate(action);
+        return true;
+      case "charge_create":
+        await syncChargeCreate(action);
+        return true;
+      case "chat_send":
+        await syncChatSend(action);
+        return true;
+      case "vendor_position":
+        await syncVendorPosition(action);
+        return true;
+      default: {
+        const exhaustiveCheck: never = action;
+        throw new Error(`Unhandled sync action: ${String(exhaustiveCheck)}`);
+      }
+    }
+  } catch (error) {
+    if (error instanceof SyncNotFoundError) {
       return false;
+    }
+
+    throw error;
   }
 }
 
@@ -170,12 +192,14 @@ async function fetchChatMessage(messageId: string, otherUserId: string) {
   }
 }
 
-async function syncCheckIn(action: CheckInAction): Promise<boolean> {
+class SyncNotFoundError extends Error {}
+
+async function syncCheckIn(action: CheckInAction): Promise<void> {
   const { payload } = action;
   const existing = await fetchVisit(payload.visitId);
 
   if (existing) {
-    return true;
+    return;
   }
 
   const defaultVisitType = await fetchDefaultVisitTypeName();
@@ -188,17 +212,15 @@ async function syncCheckIn(action: CheckInAction): Promise<boolean> {
     check_in_lng: payload.position.lng,
     visit_type: defaultVisitType,
   });
-
-  return true;
 }
 
-async function syncCheckOut(action: CheckOutAction): Promise<boolean> {
+async function syncCheckOut(action: CheckOutAction): Promise<void> {
   const { payload } = action;
   const existing = await fetchVisit(payload.visitId);
 
   if (!existing) {
     console.warn("[Sync] Visit not found for check_out:", payload.visitId);
-    return false;
+    throw new SyncNotFoundError(payload.visitId);
   }
 
   await backendApi.patch(`/visits/${payload.visitId}/checkout`, {
@@ -206,57 +228,50 @@ async function syncCheckOut(action: CheckOutAction): Promise<boolean> {
     check_out_lat: payload.position.lat,
     check_out_lng: payload.position.lng,
   });
-
-  return true;
 }
 
-async function syncVisitCreate(action: VisitCreateAction): Promise<boolean> {
+async function syncVisitCreate(action: VisitCreateAction): Promise<void> {
   const { payload } = action;
   const existing = await fetchVisit(payload.visitId);
 
   if (existing) {
-    return true;
+    return;
   }
 
   const defaultVisitType = await fetchDefaultVisitTypeName();
-
-  await backendApi.post("/visits", {
-    client_id: payload.zoneId,
-    client_name: payload.clientName,
-    check_in_at: payload.timestamp,
-    check_in_lat: payload.position.lat,
-    check_in_lng: payload.position.lng,
-    visit_type: defaultVisitType,
+  await postVisit({
+    clientId: payload.zoneId,
+    clientName: payload.clientName,
+    timestamp: payload.timestamp,
+    visitType: defaultVisitType,
+    latitude: payload.position.lat,
+    longitude: payload.position.lng,
   });
-
-  return true;
 }
 
-async function syncManualVisitCreate(action: ManualVisitCreateAction): Promise<boolean> {
+async function syncManualVisitCreate(action: ManualVisitCreateAction): Promise<void> {
   const { payload } = action;
   const existing = await fetchVisit(payload.visitId);
 
   if (existing) {
-    return true;
+    return;
   }
 
-  await backendApi.post("/visits", {
-    client_id: payload.clientId,
-    client_name: payload.clientName,
+  await postVisit({
+    clientId: payload.clientId,
+    clientName: payload.clientName,
+    timestamp: payload.timestamp,
     notes: payload.notes,
-    visit_type: payload.visitType ?? undefined,
-    check_in_at: payload.timestamp,
+    visitType: payload.visitType ?? undefined,
   });
-
-  return true;
 }
 
-async function syncClientCreate(action: ClientCreateAction): Promise<boolean> {
+async function syncClientCreate(action: ClientCreateAction): Promise<void> {
   const { payload } = action;
   const existing = await fetchClient(payload.clientId);
 
   if (existing) {
-    return true;
+    return;
   }
 
   await backendApi.post("/clients", {
@@ -269,16 +284,35 @@ async function syncClientCreate(action: ClientCreateAction): Promise<boolean> {
     latitude: payload.latitude,
     longitude: payload.longitude,
   });
-
-  return true;
 }
 
-async function syncChargeCreate(action: ChargeCreateAction): Promise<boolean> {
+async function syncClientUpdate(action: ClientUpdateAction): Promise<void> {
+  const { payload } = action;
+  const existing = await fetchClient(payload.clientId);
+
+  if (!existing) {
+    console.warn("[Sync] Client not found for update:", payload.clientId);
+    throw new SyncNotFoundError(payload.clientId);
+  }
+
+  await backendApi.patch(`/clients/${payload.clientId}`, {
+    name: payload.name,
+    document: payload.document,
+    phone: payload.phone,
+    email: payload.email,
+    address: payload.address,
+    notes: payload.notes,
+    latitude: payload.latitude,
+    longitude: payload.longitude,
+  });
+}
+
+async function syncChargeCreate(action: ChargeCreateAction): Promise<void> {
   const { payload } = action;
   const existing = await fetchCharge(payload.chargeId);
 
   if (existing) {
-    return true;
+    return;
   }
 
   await backendApi.post("/charges", {
@@ -290,16 +324,14 @@ async function syncChargeCreate(action: ChargeCreateAction): Promise<boolean> {
     notes: payload.notes,
     status: "pendiente",
   });
-
-  return true;
 }
 
-async function syncChatSend(action: ChatSendAction): Promise<boolean> {
+async function syncChatSend(action: ChatSendAction): Promise<void> {
   const { payload } = action;
   const existing = await fetchChatMessage(payload.messageId, payload.receiverId);
 
   if (existing) {
-    return true;
+    return;
   }
 
   await backendApi.post("/chat/messages", {
@@ -309,11 +341,9 @@ async function syncChatSend(action: ChatSendAction): Promise<boolean> {
     message: payload.message,
     created_at: payload.createdAt,
   });
-
-  return true;
 }
 
-async function syncVendorPosition(action: VendorPositionAction): Promise<boolean> {
+async function syncVendorPosition(action: VendorPositionAction): Promise<void> {
   const { payload } = action;
   await backendApi.post("/tracking/positions", {
     vendor_id: payload.vendorId,
@@ -322,10 +352,28 @@ async function syncVendorPosition(action: VendorPositionAction): Promise<boolean
     accuracy_meters: payload.accuracyMeters,
     speed_kmh: payload.speedKmh,
     heading: payload.heading,
-    idle_duration_seconds: null,
-    is_idle: false,
+    idle_duration_seconds: payload.idleDurationSeconds,
+    is_idle: payload.isIdle,
     recorded_at: payload.recordedAt,
   });
+}
 
-  return true;
+async function postVisit(input: {
+  clientId: string | null;
+  clientName: string;
+  timestamp: string;
+  visitType?: string;
+  notes?: string | null;
+  latitude?: number;
+  longitude?: number;
+}) {
+  await backendApi.post("/visits", {
+    client_id: input.clientId,
+    client_name: input.clientName,
+    notes: input.notes,
+    visit_type: input.visitType,
+    check_in_at: input.timestamp,
+    check_in_lat: input.latitude,
+    check_in_lng: input.longitude,
+  });
 }

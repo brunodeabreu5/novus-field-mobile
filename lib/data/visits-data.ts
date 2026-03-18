@@ -4,9 +4,14 @@ import { backendApi } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
-import type { Visit, VisitPeriod } from "./types";
+import type {
+  DraftVisitAttachment,
+  VisitAttachment,
+  VisitRecord,
+  VisitPeriod,
+} from "./types";
 
-export async function fetchVisits(userId: string, period: VisitPeriod): Promise<Visit[]> {
+export async function fetchVisits(userId: string, period: VisitPeriod): Promise<VisitRecord[]> {
   const from =
     period === "today"
       ? startOfDay(new Date())
@@ -19,18 +24,18 @@ export async function fetchVisits(userId: string, period: VisitPeriod): Promise<
     to: endOfDay(to).toISOString(),
     limit: "200",
   });
-  return backendApi.get<Visit[]>(`/visits?${params.toString()}`);
+  return backendApi.get<VisitRecord[]>(`/visits?${params.toString()}`);
 }
 
 export async function createVisit(input: {
   userId: string;
   vendorName: string;
-  clientId: string;
+  clientId: string | null;
   clientName: string;
   notes: string;
   visitType: string;
 }) {
-  const visit: Visit = {
+  const visit: VisitRecord = {
     id: generateId(),
     vendor_id: input.userId,
     vendor_name: input.vendorName,
@@ -39,10 +44,13 @@ export async function createVisit(input: {
     notes: input.notes.trim() || null,
     visit_type: input.visitType,
     check_in_at: new Date().toISOString(),
-  } as Visit;
+    photos_count: 0,
+    attachments_count: 0,
+    has_attachments: false,
+  } as VisitRecord;
 
   try {
-    const created = await backendApi.post<Visit>("/visits", {
+    const created = await backendApi.post<VisitRecord>("/visits", {
       client_id: visit.client_id,
       client_name: visit.client_name,
       notes: visit.notes,
@@ -69,4 +77,73 @@ export async function createVisit(input: {
     }
     throw error;
   }
+}
+
+export async function fetchVisitAttachments(visitId: string): Promise<VisitAttachment[]> {
+  const response = await backendApi.get<{ visit_id: string; attachments: VisitAttachment[] }>(
+    `/visits/${encodeURIComponent(visitId)}/attachments`,
+  );
+  return response.attachments || [];
+}
+
+async function uploadVisitAttachment(visitId: string, attachment: DraftVisitAttachment) {
+  const uploadTarget = await backendApi.post<{
+    storage_path: string;
+    upload_url: string;
+  }>("/files/visit-attachments/presign-upload", {
+    visit_id: visitId,
+    file_name: attachment.file_name || `visit-attachment-${Date.now()}`,
+    mime_type: attachment.mime_type,
+    attachment_kind: attachment.attachment_kind,
+  });
+
+  const response = await fetch(attachment.uri);
+  const blob = await response.blob();
+  const uploadResponse = await fetch(uploadTarget.upload_url, {
+    method: "PUT",
+    headers: {
+      "Content-Type": attachment.mime_type || "application/octet-stream",
+    },
+    body: blob,
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error(`Upload failed: HTTP ${uploadResponse.status}`);
+  }
+
+  return backendApi.post<VisitAttachment>(`/visits/${visitId}/attachments`, {
+    storage_path: uploadTarget.storage_path,
+    file_name: attachment.file_name,
+    mime_type: attachment.mime_type,
+    file_size_bytes: attachment.file_size_bytes,
+    attachment_kind: attachment.attachment_kind,
+  });
+}
+
+export async function uploadVisitAttachments(
+  visitId: string,
+  attachments: DraftVisitAttachment[],
+) {
+  const uploaded: VisitAttachment[] = [];
+  const failed: string[] = [];
+
+  for (const attachment of attachments) {
+    try {
+      uploaded.push(await uploadVisitAttachment(visitId, attachment));
+    } catch (error) {
+      failed.push(
+        error instanceof Error
+          ? `${attachment.file_name}: ${error.message}`
+          : attachment.file_name,
+      );
+    }
+  }
+
+  return { uploaded, failed };
+}
+
+export async function deleteVisitAttachment(visitId: string, attachmentId: string) {
+  return backendApi.delete<{ deleted: boolean }>(
+    `/visits/${encodeURIComponent(visitId)}/attachments/${encodeURIComponent(attachmentId)}`,
+  );
 }

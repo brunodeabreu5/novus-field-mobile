@@ -66,3 +66,62 @@ export async function createClient(input: {
     throw error;
   }
 }
+
+export async function updateClient(input: {
+  userId: string;
+  client: Client;
+  name: string;
+  document: string;
+  phone: string;
+  email: string;
+  address: string;
+  notes: string;
+  latitude?: number | null;
+  longitude?: number | null;
+}) {
+  const client: Client = {
+    ...input.client,
+    name: input.name.trim(),
+    document: input.document.trim() || null,
+    phone: input.phone.trim() || null,
+    email: input.email.trim() || null,
+    address: input.address.trim() || null,
+    notes: input.notes.trim() || null,
+    latitude: input.latitude ?? null,
+    longitude: input.longitude ?? null,
+  } as Client;
+
+  try {
+    const updated = await backendApi.patch<Client>(`/clients/${input.client.id}`, {
+      name: client.name,
+      document: client.document,
+      phone: client.phone,
+      email: client.email,
+      address: client.address,
+      notes: client.notes,
+      latitude: client.latitude,
+      longitude: client.longitude,
+    });
+    return { client: updated, queued: false as const };
+  } catch (error) {
+    if (isOfflineLikeError(error)) {
+      await offlineStorage.enqueue({
+        type: "client_update",
+        payload: {
+          clientId: input.client.id,
+          userId: input.userId,
+          name: client.name,
+          document: client.document,
+          phone: client.phone,
+          email: client.email,
+          address: client.address,
+          notes: client.notes,
+          latitude: client.latitude,
+          longitude: client.longitude,
+        },
+      });
+      return { client, queued: true as const };
+    }
+    throw error;
+  }
+}

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { isExpectedAuthError } from "../lib/auth-errors.ts";
+import { deriveBackendWsUrl } from "../lib/config-utils.ts";
 import { buildVisitsByHourChart } from "../lib/dashboard.ts";
 import { generateId } from "../lib/ids.ts";
 
@@ -45,6 +47,23 @@ runTest("generateId produces distinct values", () => {
   const values = new Set(Array.from({ length: 50 }, () => generateId()));
 
   assert.equal(values.size, 50);
+});
+
+runTest("isExpectedAuthError matches expected auth failures", () => {
+  assert.equal(isExpectedAuthError(new Error("Unauthorized")), true);
+  assert.equal(isExpectedAuthError(new Error("HTTP 401")), true);
+  assert.equal(isExpectedAuthError(new Error("No active backend session")), true);
+  assert.equal(isExpectedAuthError(new Error("HTTP 500")), false);
+  assert.equal(isExpectedAuthError("Unauthorized"), false);
+});
+
+runTest("backend ws URL derivation strips /api suffix and respects override", () => {
+  assert.equal(deriveBackendWsUrl("http://localhost:4000/api"), "http://localhost:4000");
+  assert.equal(deriveBackendWsUrl("http://localhost:4000"), "http://localhost:4000");
+  assert.equal(
+    deriveBackendWsUrl("http://localhost:4000/api", "http://ws.example.com"),
+    "http://ws.example.com"
+  );
 });
 
 console.log("All tests passed");

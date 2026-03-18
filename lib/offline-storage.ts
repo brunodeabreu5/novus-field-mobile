@@ -1,5 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { Visit } from "./data/types";
 
 const QUEUE_KEY = "novus_sync_queue";
 
@@ -60,6 +59,19 @@ export interface ClientCreatePayload {
   longitude: number | null;
 }
 
+export interface ClientUpdatePayload {
+  clientId: string;
+  userId: string;
+  name: string;
+  document: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  notes: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
 export interface ChargeCreatePayload {
   chargeId: string;
   userId: string;
@@ -86,6 +98,8 @@ export interface VendorPositionPayload {
   accuracyMeters: number | null;
   speedKmh: number | null;
   heading: number | null;
+  isIdle: boolean;
+  idleDurationSeconds: number | null;
   recordedAt: string;
 }
 
@@ -120,6 +134,11 @@ export interface ClientCreateAction extends QueuedActionBase {
   payload: ClientCreatePayload;
 }
 
+export interface ClientUpdateAction extends QueuedActionBase {
+  type: "client_update";
+  payload: ClientUpdatePayload;
+}
+
 export interface ChargeCreateAction extends QueuedActionBase {
   type: "charge_create";
   payload: ChargeCreatePayload;
@@ -141,6 +160,7 @@ export type QueuedAction =
   | VisitCreateAction
   | ManualVisitCreateAction
   | ClientCreateAction
+  | ClientUpdateAction
   | ChargeCreateAction
   | ChatSendAction
   | VendorPositionAction;

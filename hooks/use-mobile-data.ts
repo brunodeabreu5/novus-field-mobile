@@ -3,7 +3,7 @@ export { useDashboardData } from "./data/use-dashboard-data";
 export { useVisitsData, useCreateVisit } from "./data/use-visits-data";
 export { useVisitTypeOptionsData } from "./data/use-visit-types-data";
 export { useVisitSettingsData, useUpdateVisitSettings } from "./data/use-visit-settings-data";
-export { useClientsData, useCreateClient } from "./data/use-clients-data";
+export { useClientsData, useCreateClient, useUpdateClient } from "./data/use-clients-data";
 export { useChargesData, useCreateCharge } from "./data/use-charges-data";
 export {
   useContactsData,

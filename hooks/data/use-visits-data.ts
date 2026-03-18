@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createVisit,
   fetchVisits,
-  type Visit,
+  type VisitRecord,
   type VisitPeriod,
 } from "../../lib/mobile-data";
 import { mobileQueryKeys } from "./query-keys";
@@ -23,7 +23,7 @@ export function useCreateVisit() {
   return useMutation({
     mutationFn: createVisit,
     onSuccess: (result, variables) => {
-      queryClient.setQueryData<Visit[]>(
+      queryClient.setQueryData<VisitRecord[]>(
         mobileQueryKeys.visits(variables.userId, "today"),
         (current = []) => {
           if (current.some((item) => item.id === result.visit.id)) {
@@ -32,7 +32,7 @@ export function useCreateVisit() {
           return [result.visit, ...current];
         }
       );
-      queryClient.setQueryData<Visit[]>(
+      queryClient.setQueryData<VisitRecord[]>(
         mobileQueryKeys.visits(variables.userId, "week"),
         (current = []) => {
           if (current.some((item) => item.id === result.visit.id)) {

@@ -10,6 +10,34 @@ export type ChatReaction = Tables<"chat_reactions">;
 export type ManagerNotification = Tables<"manager_notifications">;
 export type VendorPosition = Tables<"vendor_positions">;
 export type VisitTypeOption = Tables<"visit_type_options">;
+export type VisitAttachmentKind = "image" | "document";
+export type VisitRecord = Visit & {
+  photos_count?: number | null;
+  attachments_count?: number | null;
+  has_attachments?: boolean;
+};
+
+export interface VisitAttachment {
+  id: string;
+  visit_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  attachment_kind: VisitAttachmentKind;
+  created_by: string;
+  created_at: string;
+  signed_url: string;
+  is_legacy?: boolean;
+}
+
+export interface DraftVisitAttachment {
+  uri: string;
+  file_name: string;
+  mime_type: string | null;
+  file_size_bytes: number | null;
+  attachment_kind: VisitAttachmentKind;
+}
 
 export type ChatAttachmentKind = "image" | "audio" | "file";
 
