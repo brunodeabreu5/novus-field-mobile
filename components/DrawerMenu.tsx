@@ -149,7 +149,7 @@ export default function DrawerMenu() {
                   resizeMode="contain"
                 />
               </View>
-              <Text style={styles.brand}>Novus Field</Text>
+              <Text style={styles.brand}>NovusField</Text>
               <Text style={styles.brandSub}>Gestion de equipos</Text>
               <View style={styles.rolePill}>
                 <Text style={styles.rolePillText}>

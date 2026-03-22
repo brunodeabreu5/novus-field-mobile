@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Novus Field",
+    "name": "NovusField",
     "slug": "novus-field",
     "description": "Gestión de equipos de ventas en campo con GPS y geofencing",
     "version": "1.0.0",
@@ -17,7 +17,7 @@
       "supportsTablet": true,
       "infoPlist": {
         "UIBackgroundModes": ["location", "remote-notification"],
-        "NSMicrophoneUsageDescription": "Novus Field necesita acceso al microfono para grabar audios en el chat."
+        "NSMicrophoneUsageDescription": "NovusField necesita acceso al microfono para grabar audios en el chat."
       }
     },
     "android": {
@@ -44,14 +44,14 @@
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Novus Field usa Face ID para desbloquear el acceso a la sesion guardada."
+          "faceIDPermission": "NovusField usa Face ID para desbloquear el acceso a la sesion guardada."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Novus Field necesita su ubicacion para registrar visitas y tracking en campo.",
-          "locationAlwaysAndWhenInUsePermission": "Novus Field necesita acceso continuo a la ubicacion para registrar recorridos y visitas en segundo plano.",
+          "locationWhenInUsePermission": "NovusField necesita su ubicacion para registrar visitas y tracking en campo.",
+          "locationAlwaysAndWhenInUsePermission": "NovusField necesita acceso continuo a la ubicacion para registrar recorridos y visitas en segundo plano.",
           "isAndroidBackgroundLocationEnabled": true,
           "isIosBackgroundLocationEnabled": true
         }

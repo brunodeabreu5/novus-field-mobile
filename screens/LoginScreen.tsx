@@ -95,7 +95,7 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.title}>Novus Field</Text>
+          <Text style={styles.title}>NovusField</Text>
           <Text style={styles.subtitle}>
             Gestion de equipos comerciales en campo
           </Text>

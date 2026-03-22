@@ -1,14 +1,6 @@
 import Constants from "expo-constants";
 import { deriveBackendWsUrl } from "./config-utils";
 
-type MobileEnv = {
-  EXPO_PUBLIC_PROJECT_ID?: string;
-  EXPO_PUBLIC_API_URL?: string;
-  EXPO_PUBLIC_WS_URL?: string;
-  EXPO_PUBLIC_CONTROL_API_URL?: string;
-  [key: string]: unknown;
-};
-
 const INVALID_PROJECT_ID_VALUES = new Set([
   "",
   "your-expo-project-id",
@@ -30,8 +22,6 @@ function normalizeProjectId(value: unknown): string | undefined {
 }
 
 export function getExpoProjectId(): string | undefined {
-  const env = process.env as MobileEnv;
-
   const easProjectId = normalizeProjectId(Constants.easConfig?.projectId);
   if (easProjectId) return easProjectId;
 
@@ -41,20 +31,17 @@ export function getExpoProjectId(): string | undefined {
   );
   if (expoConfigProjectId) return expoConfigProjectId;
 
-  return normalizeProjectId(env.EXPO_PUBLIC_PROJECT_ID);
+  return normalizeProjectId(process.env.EXPO_PUBLIC_PROJECT_ID);
 }
 
 export function resolveBackendApiUrl(): string {
-  const env = process.env as MobileEnv;
-  return env.EXPO_PUBLIC_API_URL?.trim() || "http://localhost:4000/api";
+  return process.env.EXPO_PUBLIC_API_URL?.trim() || "http://localhost:4000/api";
 }
 
 export function resolveBackendWsUrl(): string {
-  const env = process.env as MobileEnv;
-  return deriveBackendWsUrl(resolveBackendApiUrl(), env.EXPO_PUBLIC_WS_URL);
+  return deriveBackendWsUrl(resolveBackendApiUrl(), process.env.EXPO_PUBLIC_WS_URL);
 }
 
 export function resolveControlApiUrl(): string {
-  const env = process.env as MobileEnv;
-  return env.EXPO_PUBLIC_CONTROL_API_URL?.trim() || "http://localhost:4010/api";
+  return process.env.EXPO_PUBLIC_CONTROL_API_URL?.trim() || "http://localhost:4010/api";
 }

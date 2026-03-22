@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
 } from "react-native";
 import { useTenant } from "../contexts/TenantContext";
 import { colors } from "../theme/colors";
@@ -22,7 +23,7 @@ export default function TenantBootstrapScreen() {
   const handleContinue = async () => {
     const value = identifier.trim();
     if (!value) {
-      setError("Informe o codigo ou slug da empresa");
+      setError("Informe seu código.");
       return;
     }
 
@@ -31,7 +32,7 @@ export default function TenantBootstrapScreen() {
     try {
       await resolveTenant(value);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "No se pudo resolver la empresa");
+      setError(nextError instanceof Error ? nextError.message : "Nao foi possivel localizar a empresa.");
     } finally {
       setSubmitting(false);
     }
@@ -43,15 +44,22 @@ export default function TenantBootstrapScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <View style={styles.card}>
-        <Text style={styles.eyebrow}>Tenant bootstrap</Text>
+        <View style={styles.header}>
+          <View style={styles.logoBox}>
+            <Image
+              source={require("../assets/icon.png")}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          </View>
+          <Text style={styles.brand}>NovusField</Text>
+        </View>
         <Text style={styles.title}>Conecte a sua empresa</Text>
-        <Text style={styles.subtitle}>
-          Informe o slug ou company code cadastrado no control plane para carregar a stack correta.
-        </Text>
+        <Text style={styles.subtitle}>Informe seu código.</Text>
 
         <TextInput
           style={styles.input}
-          placeholder="Ex: acme ou ACME001"
+          placeholder="Digite seu código"
           placeholderTextColor={colors.mutedForeground}
           value={identifier}
           onChangeText={setIdentifier}
@@ -100,13 +108,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  eyebrow: {
-    fontSize: f.xs,
+  header: {
+    alignItems: "center",
+    marginBottom: s.lg,
+  },
+  logoBox: {
+    width: s["2xl"] + s.lg,
+    height: s["2xl"] + s.lg,
+    borderRadius: r.lg,
+    backgroundColor: colors.muted,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: s.md,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  logoImage: {
+    width: s["2xl"],
+    height: s["2xl"],
+  },
+  brand: {
+    fontSize: f["3xl"],
     fontWeight: "700",
-    color: colors.primary,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: s.sm,
+    color: colors.foreground,
   },
   title: {
     fontSize: f["2xl"],
