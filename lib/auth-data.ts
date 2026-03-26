@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Profile } from "../contexts/AuthContext";
+import { clearAuthMemoryCache } from "./backend-auth";
 
 export const PROFILE_DISMISSED_KEY = "profile_dismissed";
 
@@ -15,6 +16,7 @@ export async function isProfileDismissed(): Promise<boolean> {
 
 export async function clearStaleAuthStorage() {
   await AsyncStorage.removeItem("backend_auth_session");
+  clearAuthMemoryCache();
 }
 
 export async function clearDismissedProfilePrompt() {

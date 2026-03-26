@@ -20,25 +20,42 @@ interface ResolveTenantPayload {
 
 const TENANT_CONFIG_STORAGE_KEY = "tenant_runtime_config";
 
+let tenantConfigMemory: TenantRuntimeConfig | null = null;
+let tenantConfigMemoryReady = false;
+
 export async function getTenantConfig(): Promise<TenantRuntimeConfig | null> {
+  if (tenantConfigMemoryReady) {
+    return tenantConfigMemory;
+  }
+
   const raw = await AsyncStorage.getItem(TENANT_CONFIG_STORAGE_KEY);
   if (!raw) {
+    tenantConfigMemory = null;
+    tenantConfigMemoryReady = true;
     return null;
   }
 
   try {
-    return JSON.parse(raw) as TenantRuntimeConfig;
+    tenantConfigMemory = JSON.parse(raw) as TenantRuntimeConfig;
+    tenantConfigMemoryReady = true;
+    return tenantConfigMemory;
   } catch {
     await AsyncStorage.removeItem(TENANT_CONFIG_STORAGE_KEY);
+    tenantConfigMemory = null;
+    tenantConfigMemoryReady = true;
     return null;
   }
 }
 
 export async function saveTenantConfig(config: TenantRuntimeConfig) {
+  tenantConfigMemory = config;
+  tenantConfigMemoryReady = true;
   await AsyncStorage.setItem(TENANT_CONFIG_STORAGE_KEY, JSON.stringify(config));
 }
 
 export async function clearTenantConfig() {
+  tenantConfigMemory = null;
+  tenantConfigMemoryReady = true;
   await AsyncStorage.removeItem(TENANT_CONFIG_STORAGE_KEY);
 }
 

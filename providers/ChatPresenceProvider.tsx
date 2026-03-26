@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { isExpectedAuthError } from "../lib/auth-errors";
 import { backendApi } from "../lib/backend-api";
+import { logger } from "../lib/logger";
 
 const CHAT_PRESENCE_INTERVAL_MS = 30_000;
 
@@ -40,7 +41,7 @@ export function ChatPresenceProvider({
           return;
         }
 
-        console.error("Failed to update global mobile chat presence", error);
+        logger.error("Chat", "Failed to update global mobile chat presence", error);
       }
     };
 

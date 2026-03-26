@@ -60,6 +60,15 @@ export interface AuthSnapshot {
 const AUTH_STORAGE_KEY = "backend_auth_session";
 const listeners = new Set<(snapshot: AuthSnapshot) => void>();
 
+let authStateMemory: StoredAuthState | null = null;
+let authStateMemoryReady = false;
+
+/** Call if `backend_auth_session` is removed outside this module (e.g. legacy cleanup). */
+export function clearAuthMemoryCache() {
+  authStateMemory = null;
+  authStateMemoryReady = true;
+}
+
 function normalizeProfile(user: BackendUserPayload): AuthProfile {
   return {
     id: user.id,
@@ -101,18 +110,33 @@ function toSnapshot(state: StoredAuthState | null): AuthSnapshot {
 }
 
 async function readStoredState(): Promise<StoredAuthState | null> {
+  if (authStateMemoryReady) {
+    return authStateMemory;
+  }
+
   const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
-  if (!raw) return null;
+  if (!raw) {
+    authStateMemory = null;
+    authStateMemoryReady = true;
+    return null;
+  }
 
   try {
-    return JSON.parse(raw) as StoredAuthState;
+    authStateMemory = JSON.parse(raw) as StoredAuthState;
+    authStateMemoryReady = true;
+    return authStateMemory;
   } catch {
     await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    authStateMemory = null;
+    authStateMemoryReady = true;
     return null;
   }
 }
 
 async function writeStoredState(state: StoredAuthState | null) {
+  authStateMemory = state;
+  authStateMemoryReady = true;
+
   if (!state) {
     await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
     return;

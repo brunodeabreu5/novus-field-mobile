@@ -5,6 +5,8 @@ import * as TaskManager from "expo-task-manager";
 import { useAuth } from "../contexts/AuthContext";
 import { isExpectedAuthError } from "../lib/auth-errors";
 import { backendApi } from "../lib/backend-api";
+import { logger } from "../lib/logger";
+import { NOTIFICATION_TEXTS } from "../lib/notifications";
 import { offlineStorage } from "../lib/offline-storage";
 import { isOfflineLikeError } from "../lib/sync";
 
@@ -239,8 +241,8 @@ async function processBackgroundLocationBatch(vendorId: string, locations: Locat
         return;
       }
 
-      console.warn(
-        "[Tracking] Background fallback position failed:",
+      logger.warn(
+        "Tracking", "Background fallback position failed:",
         getUnknownErrorMessage(insertError)
       );
     }
@@ -258,8 +260,8 @@ async function processBackgroundLocationBatch(vendorId: string, locations: Locat
         return;
       }
 
-      console.warn(
-        "[Tracking] Background position failed:",
+      logger.warn(
+        "Tracking", "Background position failed:",
         getUnknownErrorMessage(insertError)
       );
     }
@@ -366,8 +368,8 @@ async function initializeTrackingSession(
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
       foregroundService: {
-        notificationTitle: "Novus Field tracking ativo",
-        notificationBody: "Registrando localizacao do vendedor em campo.",
+        notificationTitle: NOTIFICATION_TEXTS.tracking.foregroundService.title,
+        notificationBody: NOTIFICATION_TEXTS.tracking.foregroundService.body,
       },
     });
   }
@@ -448,8 +450,8 @@ async function publishTrackingHeartbeat(
     last_error: payload.lastError ?? null,
   }).catch((error) => {
     if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
-      console.warn(
-        "[Tracking] Heartbeat update failed:",
+      logger.warn(
+        "Tracking", "Heartbeat update failed:",
         error instanceof Error ? error.message : error,
       );
     }
@@ -473,8 +475,8 @@ async function persistPosition(
       JSON.stringify(lastLocationSnapshot)
     );
   } catch (storageError) {
-    console.warn(
-      "[Tracking] Failed to persist last location cache:",
+    logger.warn(
+      "Tracking", "Failed to persist last location cache:",
       storageError instanceof Error ? storageError.message : storageError
     );
   }
@@ -542,7 +544,7 @@ if (!taskDefined) {
 
       if (error) {
         if (!isTransientLocationTaskError(error)) {
-          console.warn("[Tracking] Background task error:", getUnknownErrorMessage(error));
+          logger.warn("Tracking", "Background task error:", getUnknownErrorMessage(error));
         }
       }
 
@@ -682,8 +684,8 @@ export function useVendorTracking(options: {
 
       if (!enabled || !vendorId || !session) {
         stopTrackingCompletely().catch((stopError) => {
-          console.warn(
-            "[Tracking] Failed to stop:",
+          logger.warn(
+            "Tracking", "Failed to stop:",
             stopError instanceof Error ? stopError.message : stopError
           );
         });
