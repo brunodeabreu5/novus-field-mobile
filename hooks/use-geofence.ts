@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { backendApi } from "../lib/backend-api";
 import {
@@ -13,6 +14,7 @@ import {
   type CheckOutPayload,
 } from "../lib/offline-storage";
 import { generateId } from "../lib/ids";
+import { logger } from "../lib/logger";
 
 export interface VisitCheckIn {
   id: string;
@@ -32,6 +34,11 @@ interface UseGeofenceOptions {
 }
 
 type MutableSetRef<T> = { current: Set<T> };
+
+const GEOFENCE_ZONES_KEY = "novus_geofence_zones";
+const GEOFENCE_ACTIVE_VISITS_KEY = "novus_geofence_active_visits";
+const GEOFENCE_INSIDE_ZONES_KEY = "novus_geofence_inside_zones";
+const GEOFENCE_VENDOR_NAME_KEY = "novus_geofence_vendor_name";
 
 async function resolveCurrentPosition() {
   try {
@@ -70,11 +77,98 @@ async function enqueueGeofenceAction(
   try {
     await offlineStorage.enqueue({ type, payload });
   } catch (enqueueError) {
-    console.warn(
-      logLabel,
-      enqueueError instanceof Error ? enqueueError.message : enqueueError
-    );
+    logger.warn(logLabel, "Failed to enqueue action", enqueueError);
   }
+}
+
+async function saveGeofenceZones(zones: GeofenceZone[]) {
+  await AsyncStorage.setItem(GEOFENCE_ZONES_KEY, JSON.stringify(zones));
+}
+
+async function loadGeofenceZones(): Promise<GeofenceZone[]> {
+  try {
+    const raw = await AsyncStorage.getItem(GEOFENCE_ZONES_KEY);
+    return raw ? (JSON.parse(raw) as GeofenceZone[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveInsideZones(zoneIds: Set<string>) {
+  await AsyncStorage.setItem(GEOFENCE_INSIDE_ZONES_KEY, JSON.stringify(Array.from(zoneIds)));
+}
+
+async function loadInsideZones(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(GEOFENCE_INSIDE_ZONES_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function saveActiveVisits(visits: Map<string, VisitCheckIn>) {
+  await AsyncStorage.setItem(
+    GEOFENCE_ACTIVE_VISITS_KEY,
+    JSON.stringify(Array.from(visits.entries())),
+  );
+}
+
+async function loadActiveVisits(): Promise<Map<string, VisitCheckIn>> {
+  try {
+    const raw = await AsyncStorage.getItem(GEOFENCE_ACTIVE_VISITS_KEY);
+    if (!raw) return new Map();
+
+    const entries = JSON.parse(raw) as Array<[string, VisitCheckIn]>;
+    return new Map(
+      entries.map(([key, value]) => [
+        key,
+        {
+          ...value,
+          checkInTime: new Date(value.checkInTime),
+          checkOutTime: value.checkOutTime ? new Date(value.checkOutTime) : null,
+        },
+      ]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+async function saveVendorName(vendorName: string | null | undefined) {
+  if (!vendorName) {
+    await AsyncStorage.removeItem(GEOFENCE_VENDOR_NAME_KEY);
+    return;
+  }
+
+  await AsyncStorage.setItem(GEOFENCE_VENDOR_NAME_KEY, vendorName);
+}
+
+export async function getStoredGeofenceVendorName() {
+  return AsyncStorage.getItem(GEOFENCE_VENDOR_NAME_KEY);
+}
+
+async function persistGeofenceRuntimeState(options: {
+  zones?: GeofenceZone[];
+  insideZones: Set<string>;
+  activeVisits: Map<string, VisitCheckIn>;
+}) {
+  if (options.zones) {
+    await saveGeofenceZones(options.zones);
+  }
+  await Promise.all([
+    saveInsideZones(options.insideZones),
+    saveActiveVisits(options.activeVisits),
+  ]);
+}
+
+async function clearGeofenceRuntimeState() {
+  await Promise.all([
+    AsyncStorage.removeItem(GEOFENCE_ZONES_KEY),
+    AsyncStorage.removeItem(GEOFENCE_ACTIVE_VISITS_KEY),
+    AsyncStorage.removeItem(GEOFENCE_INSIDE_ZONES_KEY),
+    AsyncStorage.removeItem(GEOFENCE_VENDOR_NAME_KEY),
+  ]);
 }
 
 async function processGeofenceZone(options: {
@@ -158,6 +252,75 @@ async function processGeofenceZone(options: {
   }
 }
 
+async function processGeofencePosition(options: {
+  position: GeoPosition;
+  zones: GeofenceZone[];
+  autoCheckIn: boolean;
+  vendorId: string | null | undefined;
+  vendorName: string | null | undefined;
+  insideZones: Set<string>;
+  activeVisits: Map<string, VisitCheckIn>;
+}) {
+  const nowInside = new Set<string>();
+  const nextActive = new Map(options.activeVisits);
+  const insideZonesRef = { current: options.insideZones };
+
+  for (const zone of options.zones) {
+    await processGeofenceZone({
+      zone,
+      position: options.position,
+      autoCheckIn: options.autoCheckIn,
+      vendorId: options.vendorId,
+      vendorName: options.vendorName,
+      nowInside,
+      nextActive,
+      insideZonesRef,
+    });
+  }
+
+  return {
+    insideZones: nowInside,
+    activeVisits: nextActive,
+  };
+}
+
+export async function processGeofencePositionInBackground(options: {
+  position: GeoPosition;
+  vendorId: string | null | undefined;
+  vendorName?: string | null;
+  autoCheckIn?: boolean;
+}) {
+  if (!options.vendorId) {
+    return;
+  }
+
+  const zones = await loadGeofenceZones();
+  if (zones.length === 0) {
+    return;
+  }
+
+  const [insideZones, activeVisits, storedVendorName] = await Promise.all([
+    loadInsideZones(),
+    loadActiveVisits(),
+    getStoredGeofenceVendorName(),
+  ]);
+
+  const result = await processGeofencePosition({
+    position: options.position,
+    zones,
+    autoCheckIn: options.autoCheckIn ?? true,
+    vendorId: options.vendorId,
+    vendorName: options.vendorName ?? storedVendorName,
+    insideZones,
+    activeVisits,
+  });
+
+  await persistGeofenceRuntimeState({
+    insideZones: result.insideZones,
+    activeVisits: result.activeVisits,
+  });
+}
+
 export function useGeofence(options: UseGeofenceOptions) {
   const {
     enabled,
@@ -174,6 +337,41 @@ export function useGeofence(options: UseGeofenceOptions) {
 
   const insideZonesRef = useRef<Set<string>>(new Set());
   const activeVisitsRef = useRef<Map<string, VisitCheckIn>>(new Map());
+
+  useEffect(() => {
+    if (enabled && vendorId) {
+      return;
+    }
+
+    insideZonesRef.current = new Set();
+    activeVisitsRef.current = new Map();
+    setActiveVisits([]);
+    setZones([]);
+    void clearGeofenceRuntimeState();
+  }, [enabled, vendorId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const [storedInsideZones, storedActiveVisits] = await Promise.all([
+        loadInsideZones(),
+        loadActiveVisits(),
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      insideZonesRef.current = storedInsideZones;
+      activeVisitsRef.current = storedActiveVisits;
+      setActiveVisits(Array.from(storedActiveVisits.values()));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!enabled || !vendorId) return;
@@ -235,8 +433,9 @@ export function useGeofence(options: UseGeofenceOptions) {
         }
 
         setZones(zonesWithCenter);
+        await saveGeofenceZones(zonesWithCenter);
       } catch (loadError) {
-        console.warn("[Geofence] Failed to load zones from backend", loadError);
+        logger.warn("Geofence", "Failed to load zones from backend", loadError);
         setError(
           loadError instanceof Error
             ? loadError.message
@@ -247,9 +446,14 @@ export function useGeofence(options: UseGeofenceOptions) {
   }, [enabled, vendorId]);
 
   useEffect(() => {
+    void saveVendorName(enabled && vendorId ? vendorName : null);
+  }, [enabled, vendorId, vendorName]);
+
+  useEffect(() => {
     if (!enabled || zones.length === 0) return;
 
     let interval: ReturnType<typeof setInterval>;
+    let cancelled = false;
 
     const run = async () => {
       const loc = await resolveCurrentPosition();
@@ -266,30 +470,36 @@ export function useGeofence(options: UseGeofenceOptions) {
       setCurrentPosition(position);
       setError(null);
 
-      const nowInside = new Set<string>();
-      const nextActive = new Map(activeVisitsRef.current);
+      const result = await processGeofencePosition({
+        position,
+        zones,
+        autoCheckIn,
+        vendorId,
+        vendorName,
+        insideZones: insideZonesRef.current,
+        activeVisits: activeVisitsRef.current,
+      });
 
-      for (const zone of zones) {
-        await processGeofenceZone({
-          zone,
-          position,
-          autoCheckIn,
-          vendorId,
-          vendorName,
-          nowInside,
-          nextActive,
-          insideZonesRef,
-        });
+      insideZonesRef.current = result.insideZones;
+      activeVisitsRef.current = result.activeVisits;
+
+      if (!cancelled) {
+        setActiveVisits(Array.from(result.activeVisits.values()));
       }
 
-      insideZonesRef.current = nowInside;
-      activeVisitsRef.current = nextActive;
-      setActiveVisits(Array.from(nextActive.values()));
+      await persistGeofenceRuntimeState({
+        zones,
+        insideZones: result.insideZones,
+        activeVisits: result.activeVisits,
+      });
     };
 
-    run();
+    void run();
     interval = setInterval(run, intervalMs);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [enabled, zones, vendorId, vendorName, autoCheckIn, intervalMs]);
 
   const manualCheckOut = useCallback(
@@ -313,10 +523,7 @@ export function useGeofence(options: UseGeofenceOptions) {
             },
           })
           .catch((enqueueError) => {
-            console.warn(
-              "[Geofence] Failed to enqueue manual check-out:",
-              enqueueError instanceof Error ? enqueueError.message : enqueueError
-            );
+            logger.warn("Geofence", "Failed to enqueue manual check-out", enqueueError);
           });
       }
     },

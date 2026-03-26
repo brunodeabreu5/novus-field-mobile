@@ -3,12 +3,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { useAuth } from "../contexts/AuthContext";
+import {
+  getStoredGeofenceVendorName,
+  processGeofencePositionInBackground,
+} from "./use-geofence";
 import { isExpectedAuthError } from "../lib/auth-errors";
 import { backendApi } from "../lib/backend-api";
 import { logger } from "../lib/logger";
 import { NOTIFICATION_TEXTS } from "../lib/notifications";
 import { offlineStorage } from "../lib/offline-storage";
-import { isOfflineLikeError } from "../lib/sync";
+import { isOfflineLikeError, syncQueuedTrackingActions } from "../lib/sync";
 
 const TRACKING_TASK_NAME = "novus-vendor-background-tracking";
 const TRACKING_VENDOR_ID_KEY = "novus_tracking_vendor_id";
@@ -225,7 +229,26 @@ async function persistVendorPositionInOfflineQueue(
   });
 }
 
+async function flushQueuedTrackingPositions(reason: string) {
+  try {
+    const synced = await syncQueuedTrackingActions();
+    if (synced > 0) {
+      logger.info("Tracking", `Flushed ${synced} queued tracking position(s) after ${reason}`);
+    }
+  } catch (error) {
+    if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
+      logger.warn(
+        "Tracking",
+        `Failed to flush queued tracking after ${reason}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+}
+
 async function processBackgroundLocationBatch(vendorId: string, locations: Location.LocationObject[]) {
+  const geofenceVendorName = await getStoredGeofenceVendorName();
+
   if (locations.length === 0) {
     const fallbackLocation = await resolveCurrentLocation();
     if (!fallbackLocation) {
@@ -235,6 +258,15 @@ async function processBackgroundLocationBatch(vendorId: string, locations: Locat
     try {
       await persistPosition(vendorId, fallbackLocation, {
         trackingMode: "background",
+      });
+      await processGeofencePositionInBackground({
+        position: {
+          lat: fallbackLocation.coords.latitude,
+          lng: fallbackLocation.coords.longitude,
+          accuracy: fallbackLocation.coords.accuracy ?? 20,
+        },
+        vendorId,
+        vendorName: geofenceVendorName,
       });
     } catch (insertError) {
       if (isExpectedAuthError(insertError)) {
@@ -254,6 +286,15 @@ async function processBackgroundLocationBatch(vendorId: string, locations: Locat
     try {
       await persistPosition(vendorId, location, {
         trackingMode: "background",
+      });
+      await processGeofencePositionInBackground({
+        position: {
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+          accuracy: location.coords.accuracy ?? 20,
+        },
+        vendorId,
+        vendorName: geofenceVendorName,
       });
     } catch (insertError) {
       if (isExpectedAuthError(insertError)) {
@@ -531,6 +572,8 @@ async function persistPosition(
     trackingMode: options.trackingMode,
     lastPositionAt: timestampIso,
   });
+
+  await flushQueuedTrackingPositions("position persistence");
 }
 
 if (!taskDefined) {

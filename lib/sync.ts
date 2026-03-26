@@ -17,6 +17,12 @@ import {
   type VisitCreateAction,
 } from "./offline-storage";
 
+interface SyncQueuedActionsOptions {
+  allowedTypes?: QueuedAction["type"][];
+}
+
+let syncInFlight: Promise<number> | null = null;
+
 async function fetchDefaultVisitTypeName() {
   try {
     const data = await backendApi.get<Array<{ name: string; is_default: boolean }>>(
@@ -44,14 +50,34 @@ async function fetchDefaultVisitTypeName() {
   return "Comercial";
 }
 
-export async function syncQueuedActions(): Promise<number> {
+export async function syncQueuedActions(
+  options?: SyncQueuedActionsOptions,
+): Promise<number> {
+  if (syncInFlight) {
+    return syncInFlight;
+  }
+
+  syncInFlight = runQueuedSync(options);
+
+  try {
+    return await syncInFlight;
+  } finally {
+    syncInFlight = null;
+  }
+}
+
+async function runQueuedSync(options?: SyncQueuedActionsOptions): Promise<number> {
   const queue = await offlineStorage.getQueue();
-  if (queue.length === 0) return 0;
+  const filteredQueue = options?.allowedTypes?.length
+    ? queue.filter((action) => options.allowedTypes?.includes(action.type))
+    : queue;
+
+  if (filteredQueue.length === 0) return 0;
 
   let synced = 0;
   const errors: string[] = [];
 
-  for (const action of queue) {
+  for (const action of filteredQueue) {
     try {
       const wasSynced = await syncAction(action);
       if (!wasSynced) {
@@ -72,6 +98,12 @@ export async function syncQueuedActions(): Promise<number> {
   }
 
   return synced;
+}
+
+export function syncQueuedTrackingActions() {
+  return syncQueuedActions({
+    allowedTypes: ["vendor_position", "check_in", "check_out"],
+  });
 }
 
 export function isOfflineLikeError(error: unknown): boolean {
