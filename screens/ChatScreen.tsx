@@ -26,6 +26,7 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   getAccessToken,
 } from "../lib/backend-auth";
+import { offlineStorage } from "../lib/offline-storage";
 import {
   useContactsData,
   useMarkConversationAsRead,
@@ -111,6 +112,7 @@ export default function ChatScreen() {
   const [recording, setRecording] = useState<RecordingHandle | null>(null);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
+  const [queuedMessages, setQueuedMessages] = useState<ChatMessage[]>([]);
   const listRef = useRef<FlatList>(null);
   const soundRef = useRef<SoundHandle | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -144,6 +146,81 @@ export default function ChatScreen() {
       );
     });
   }, [contactSearch, contacts]);
+
+  const mergedMessages = useMemo(() => {
+    const map = new Map<string, ChatMessage>();
+
+    messages.forEach((message) => {
+      map.set(message.id, message);
+    });
+
+    queuedMessages.forEach((message) => {
+      if (!map.has(message.id)) {
+        map.set(message.id, message);
+      }
+    });
+
+    return Array.from(map.values()).sort((left, right) =>
+      left.created_at.localeCompare(right.created_at)
+    );
+  }, [messages, queuedMessages]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadQueuedMessages = async () => {
+      if (!user || !selectedContact) {
+        if (!cancelled) {
+          setQueuedMessages([]);
+        }
+        return;
+      }
+
+      const queue = await offlineStorage.getQueue();
+      const nextQueued = queue
+        .filter(
+          (item): item is Extract<(typeof queue)[number], { type: "chat_send" }> =>
+            item.type === "chat_send" &&
+            item.payload.senderId === user.id &&
+            item.payload.receiverId === selectedContact.id
+        )
+        .map<ChatMessage>((item) => ({
+          id: item.payload.messageId,
+          sender_id: item.payload.senderId,
+          receiver_id: item.payload.receiverId,
+          message: item.payload.message,
+          read: false,
+          created_at: item.payload.createdAt,
+          reply_to_id: null,
+          attachments: item.payload.attachments.map((attachment) => ({
+            id: attachment.attachmentId,
+            message_id: item.payload.messageId,
+            uploaded_by: item.payload.senderId,
+            storage_path: "",
+            file_name: attachment.fileName,
+            mime_type: attachment.mimeType,
+            file_size_bytes: attachment.fileSizeBytes,
+            attachment_kind: attachment.attachmentKind as ChatAttachment["attachment_kind"],
+            duration_seconds: attachment.durationSeconds,
+            created_at: item.payload.createdAt,
+            signedUrl: null,
+            queued: true,
+          })),
+          reactions: [],
+          queued: true,
+        }));
+
+      if (!cancelled) {
+        setQueuedMessages(nextQueued);
+      }
+    };
+
+    void loadQueuedMessages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [messages, selectedContact, user]);
 
   useEffect(() => {
     if (!selectedContact) {
@@ -635,7 +712,7 @@ export default function ChatScreen() {
         ) : (
           <FlatList
             ref={listRef}
-            data={messages}
+             data={mergedMessages}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => {
               const groupedReactions = groupReactions(item);
@@ -671,7 +748,11 @@ export default function ChatScreen() {
                       <Pressable
                         key={attachment.id}
                         onPress={() => openAttachment(attachment)}
-                        style={styles.attachmentCard}
+                        disabled={attachment.queued}
+                        style={[
+                          styles.attachmentCard,
+                          attachment.queued ? styles.attachmentCardQueued : null,
+                        ]}
                       >
                         {attachment.attachment_kind === "image" && attachment.signedUrl ? (
                           <Image
@@ -701,11 +782,29 @@ export default function ChatScreen() {
                             ]}
                           >
                             {buildAttachmentLabel(attachment)}
-                            {attachment.duration_seconds
-                              ? ` · ${formatDuration(attachment.duration_seconds)}`
-                              : ""}
-                          </Text>
-                          {attachment.attachment_kind === "audio" ? (
+                           {attachment.duration_seconds
+                               ? ` · ${formatDuration(attachment.duration_seconds)}`
+                               : ""}
+                           </Text>
+                           {attachment.queued ? (
+                             <Text style={styles.queuedAttachmentBadge}>Pendente de sync</Text>
+                           ) : null}
+                           {attachment.attachment_kind === "audio" ? (
+                             <Text
+                               style={[
+                                 styles.attachmentAction,
+                                 item.sender_id === user?.id
+                                   ? styles.bubbleTextMe
+                                   : styles.bubbleTextThem,
+                               ]}
+                             >
+                               {attachment.queued
+                                 ? "Sincroniza al volver la conexion"
+                                 : activeAudioId === attachment.id
+                                 ? "Pausar"
+                                 : "Reproducir"}
+                             </Text>
+                           ) : attachment.attachment_kind === "file" ? (
                             <Text
                               style={[
                                 styles.attachmentAction,
@@ -714,21 +813,12 @@ export default function ChatScreen() {
                                   : styles.bubbleTextThem,
                               ]}
                             >
-                              {activeAudioId === attachment.id ? "Pausar" : "Reproducir"}
-                            </Text>
-                          ) : attachment.attachment_kind === "file" ? (
-                            <Text
-                              style={[
-                                styles.attachmentAction,
-                                item.sender_id === user?.id
-                                  ? styles.bubbleTextMe
-                                  : styles.bubbleTextThem,
-                              ]}
-                            >
-                              Abrir / compartir
-                            </Text>
-                          ) : null}
-                        </View>
+                               {attachment.queued
+                                 ? "Sincroniza al volver la conexion"
+                                 : "Abrir / compartir"}
+                             </Text>
+                           ) : null}
+                         </View>
                       </Pressable>
                     ))}
 
@@ -739,10 +829,11 @@ export default function ChatScreen() {
                           ? styles.bubbleTimeMe
                           : styles.bubbleTimeThem,
                       ]}
-                    >
-                      {format(new Date(item.created_at), "HH:mm")}
-                    </Text>
-                  </TouchableOpacity>
+                     >
+                       {format(new Date(item.created_at), "HH:mm")}
+                     </Text>
+                     {item.queued ? <Text style={styles.queuedMessageText}>Pendente de sync</Text> : null}
+                   </TouchableOpacity>
 
                   {groupedReactions.length > 0 ? (
                     <View style={styles.reactionRow}>
@@ -808,6 +899,7 @@ export default function ChatScreen() {
                       ? ` · ${formatDuration(attachment.duration_seconds)}`
                       : ""}
                   </Text>
+                  <Text style={styles.draftQueuedHint}>Se sincroniza si estas offline</Text>
                 </View>
                 <TouchableOpacity onPress={() => removeDraftAttachment(attachment.uri)}>
                   <Text style={styles.removeAttachment}>Remover</Text>
@@ -1027,6 +1119,12 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "rgba(255,255,255,0.08)",
   },
+  attachmentCardQueued: {
+    opacity: 0.75,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    borderStyle: "dashed",
+  },
   attachmentImage: {
     width: 180,
     height: 120,
@@ -1042,10 +1140,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
+  queuedAttachmentBadge: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "600",
+  },
   attachmentAction: {
     fontSize: 12,
     fontWeight: "600",
     marginTop: 8,
+  },
+  queuedMessageText: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#fef3c7",
   },
   reactionRow: {
     flexDirection: "row",
@@ -1124,6 +1239,12 @@ const styles = StyleSheet.create({
   draftAttachmentSubtitle: {
     color: colors.mutedForeground,
     fontSize: 12,
+  },
+  draftQueuedHint: {
+    marginTop: 4,
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "600",
   },
   removeAttachment: {
     marginTop: 8,
@@ -1240,5 +1361,3 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
-
-

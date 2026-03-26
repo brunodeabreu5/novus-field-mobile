@@ -11,6 +11,18 @@ import type {
   VisitPeriod,
 } from "./types";
 
+function toQueuedVisitAttachment(visitId: string, attachment: DraftVisitAttachment) {
+  return {
+    attachmentId: generateId(),
+    visitId,
+    localUri: attachment.uri,
+    fileName: attachment.file_name,
+    mimeType: attachment.mime_type,
+    fileSizeBytes: attachment.file_size_bytes,
+    attachmentKind: attachment.attachment_kind,
+  } as const;
+}
+
 export async function fetchVisits(userId: string, period: VisitPeriod): Promise<VisitRecord[]> {
   const from =
     period === "today"
@@ -126,11 +138,21 @@ export async function uploadVisitAttachments(
 ) {
   const uploaded: VisitAttachment[] = [];
   const failed: string[] = [];
+  let queued = 0;
 
   for (const attachment of attachments) {
     try {
       uploaded.push(await uploadVisitAttachment(visitId, attachment));
     } catch (error) {
+      if (isOfflineLikeError(error)) {
+        await offlineStorage.enqueue({
+          type: "visit_attachment_upload",
+          payload: toQueuedVisitAttachment(visitId, attachment),
+        });
+        queued += 1;
+        continue;
+      }
+
       failed.push(
         error instanceof Error
           ? `${attachment.file_name}: ${error.message}`
@@ -139,7 +161,7 @@ export async function uploadVisitAttachments(
     }
   }
 
-  return { uploaded, failed };
+  return { uploaded, failed, queued };
 }
 
 export async function deleteVisitAttachment(visitId: string, attachmentId: string) {

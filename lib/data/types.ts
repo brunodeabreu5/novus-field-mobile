@@ -29,6 +29,7 @@ export interface VisitAttachment {
   created_at: string;
   signed_url: string;
   is_legacy?: boolean;
+  queued?: boolean;
 }
 
 export interface DraftVisitAttachment {
@@ -44,6 +45,7 @@ export type ChatAttachmentKind = "image" | "audio" | "file";
 export interface ChatAttachment extends ChatAttachmentRow {
   attachment_kind: ChatAttachmentKind;
   signedUrl?: string | null;
+  queued?: boolean;
 }
 
 export interface ChatMessage extends ChatMessageRow {

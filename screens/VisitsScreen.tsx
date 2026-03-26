@@ -36,6 +36,7 @@ import type {
 import {
   deleteVisitAttachment,
   fetchVisitAttachments,
+  offlineStorage,
   uploadVisitAttachments,
 } from "../lib/mobile-data";
 import { mobileQueryKeys } from "../hooks/data/query-keys";
@@ -222,6 +223,8 @@ export default function VisitsScreen() {
   const [attachmentsByVisit, setAttachmentsByVisit] = useState<Record<string, VisitAttachment[]>>({});
   const [loadingAttachmentsByVisit, setLoadingAttachmentsByVisit] = useState<Record<string, boolean>>({});
   const [uploadingVisitId, setUploadingVisitId] = useState<string | null>(null);
+  const [pendingAttachmentCountByVisit, setPendingAttachmentCountByVisit] =
+    useState<Record<string, number>>({});
   const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(null);
   const [form, setForm] = useState({
     clientId: "",
@@ -512,6 +515,32 @@ export default function VisitsScreen() {
     };
   }, [visitsWithAttachments, visitsWithAttachmentsKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPendingAttachmentCounts = async () => {
+      const queue = await offlineStorage.getQueue();
+      const counts = queue.reduce<Record<string, number>>((acc, item) => {
+        if (item.type !== "visit_attachment_upload") {
+          return acc;
+        }
+
+        acc[item.payload.visitId] = (acc[item.payload.visitId] || 0) + 1;
+        return acc;
+      }, {});
+
+      if (!cancelled) {
+        setPendingAttachmentCountByVisit(counts);
+      }
+    };
+
+    void loadPendingAttachmentCounts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [attachmentsByVisit, visits]);
+
   const refreshVisitData = async () => {
     await refetchVisits();
     if (user?.id) {
@@ -618,6 +647,16 @@ export default function VisitsScreen() {
           "Carga parcial",
           `${result.uploaded.length} archivo(s) subido(s). ${result.failed.length} con error.`,
         );
+      } else if (result.queued > 0) {
+        setPendingAttachmentCountByVisit((current) => ({
+          ...current,
+          [visit.id]: (current[visit.id] || 0) + result.queued,
+        }));
+        Alert.alert(
+          "Anexos en cola",
+          `${result.queued} archivo(s) se sincronizarán cuando vuelva la conexión.`,
+        );
+        return;
       }
       await loadVisitAttachments(visit.id);
       await refreshVisitData();
@@ -685,12 +724,21 @@ export default function VisitsScreen() {
 
       if (result.queued) {
         if (draftAttachments.length > 0) {
-          Alert.alert(
-            "Visita en cola",
-            "La visita fue guardada para sincronizarse después. Los anexos solo se podrán subir cuando la visita exista en el backend.",
-          );
+          const uploadResult = await uploadVisitAttachments(result.visit.id, draftAttachments);
+          if (uploadResult.failed.length > 0) {
+            Alert.alert(
+              "Visita en cola con errores",
+              `${uploadResult.queued} anexo(s) en cola y ${uploadResult.failed.length} con error.`,
+            );
+          } else {
+            Alert.alert(
+              "Visita en cola",
+              "La visita y sus anexos quedaron en cola para sincronizarse cuando vuelva la conexión.",
+            );
+          }
         }
         setModalVisible(false);
+        setDraftAttachments([]);
         return;
       }
 
@@ -781,9 +829,12 @@ export default function VisitsScreen() {
 
   const renderDraftAttachment = (attachment: DraftVisitAttachment, index: number) => (
     <View key={`${attachment.file_name}-${index}`} style={styles.draftAttachmentRow}>
-      <Text style={styles.draftAttachmentName} numberOfLines={1}>
-        {attachment.file_name}
-      </Text>
+      <View style={styles.draftAttachmentInfo}>
+        <Text style={styles.draftAttachmentName} numberOfLines={1}>
+          {attachment.file_name}
+        </Text>
+        <Text style={styles.draftAttachmentHint}>Se sincroniza si estas offline</Text>
+      </View>
       <TouchableOpacity
         onPress={() => removeDraftAttachmentAtIndex(index)}
       >
@@ -824,6 +875,13 @@ export default function VisitsScreen() {
           <Text style={styles.countText}>Fotos: {item.photos_count || 0}</Text>
           <Text style={styles.countText}>Docs: {docsCount}</Text>
         </View>
+        {pendingAttachmentCountByVisit[item.id] ? (
+          <View style={styles.pendingSyncBadge}>
+            <Text style={styles.pendingSyncBadgeText}>
+              {pendingAttachmentCountByVisit[item.id]} anexo(s) pendente(s) de sync
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.actionsRow}>
           <TouchableOpacity
             style={styles.secondaryButton}
@@ -990,6 +1048,19 @@ const styles = StyleSheet.create({
   visitNotes: { fontSize: 13, color: colors.foreground, marginTop: 8 },
   visitCounts: { flexDirection: "row", gap: 12, marginTop: 10 },
   countText: { fontSize: 12, color: colors.mutedForeground },
+  pendingSyncBadge: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: colors.warningMuted,
+  },
+  pendingSyncBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.warning,
+  },
   actionsRow: { flexDirection: "row", gap: 10, marginTop: 12 },
   secondaryButton: {
     paddingHorizontal: 12,
@@ -1078,7 +1149,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
+  draftAttachmentInfo: {
+    flex: 1,
+    gap: 3,
+  },
   draftAttachmentName: { flex: 1, fontSize: 13, color: colors.foreground },
+  draftAttachmentHint: { fontSize: 11, color: colors.primary, fontWeight: "600" },
   removeDraftAttachment: { fontSize: 12, color: colors.destructive, fontWeight: "600" },
   searchInput: {
     borderWidth: 1,

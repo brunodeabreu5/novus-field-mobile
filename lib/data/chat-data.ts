@@ -42,12 +42,25 @@ async function uploadAttachment(senderId: string, attachment: DraftChatAttachmen
   }
 
   return {
+    id: generateId(),
     storage_path: uploadTarget.storage_path,
     file_name: attachment.file_name,
     mime_type: attachment.mime_type,
     file_size_bytes: attachment.file_size_bytes,
     attachment_kind: attachment.attachment_kind,
     duration_seconds: attachment.duration_seconds ?? null,
+  };
+}
+
+function toQueuedChatAttachment(attachment: DraftChatAttachment) {
+  return {
+    attachmentId: generateId(),
+    localUri: attachment.uri,
+    fileName: attachment.file_name,
+    mimeType: attachment.mime_type,
+    fileSizeBytes: attachment.file_size_bytes,
+    attachmentKind: attachment.attachment_kind,
+    durationSeconds: attachment.duration_seconds ?? null,
   };
 }
 
@@ -161,6 +174,7 @@ export async function sendChatMessage(input: {
           receiverId: optimisticMessage.receiver_id,
           message: optimisticMessage.message,
           createdAt: optimisticMessage.created_at,
+          attachments: attachments.map(toQueuedChatAttachment),
         },
       });
 

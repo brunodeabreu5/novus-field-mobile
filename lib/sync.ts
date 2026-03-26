@@ -1,4 +1,5 @@
 import { backendApi } from "./backend-api";
+import { logger } from "./logger";
 import {
   type ChargeCreateAction,
   type ChatSendAction,
@@ -8,8 +9,11 @@ import {
   type CheckInAction,
   type CheckOutAction,
   type ManualVisitCreateAction,
+  type QueuedChatAttachmentPayload,
   type QueuedAction,
+  type QueuedVisitAttachmentPayload,
   type VendorPositionAction,
+  type VisitAttachmentUploadAction,
   type VisitCreateAction,
 } from "./offline-storage";
 
@@ -23,8 +27,8 @@ async function fetchDefaultVisitTypeName() {
       return defaultItem.name;
     }
   } catch (error) {
-    console.warn(
-      "[Sync] Failed to load default visit type:",
+    logger.warn(
+      "Sync", "Failed to load default visit type:",
       error instanceof Error ? error.message : String(error),
     );
   }
@@ -64,7 +68,7 @@ export async function syncQueuedActions(): Promise<number> {
   }
 
   if (errors.length > 0) {
-    console.warn("[Sync] Errors:", errors);
+    logger.warn("Sync", "Errors:", errors);
   }
 
   return synced;
@@ -124,6 +128,9 @@ async function syncAction(action: QueuedAction): Promise<boolean> {
       case "vendor_position":
         await syncVendorPosition(action);
         return true;
+      case "visit_attachment_upload":
+        await syncVisitAttachmentUpload(action);
+        return true;
       default: {
         const exhaustiveCheck: never = action;
         throw new Error(`Unhandled sync action: ${String(exhaustiveCheck)}`);
@@ -139,8 +146,9 @@ async function syncAction(action: QueuedAction): Promise<boolean> {
 }
 
 async function fetchVisit(visitId: string) {
+  const resolvedVisitId = await resolveRemoteVisitId(visitId);
   try {
-    return await backendApi.get<{ id: string }>(`/visits/${visitId}`);
+    return await backendApi.get<{ id: string }>(`/visits/${resolvedVisitId}`);
   } catch (error) {
     if (error instanceof Error && error.message.includes("404")) {
       return null;
@@ -150,6 +158,10 @@ async function fetchVisit(visitId: string) {
     }
     throw error;
   }
+}
+
+async function resolveRemoteVisitId(visitId: string) {
+  return (await offlineStorage.getVisitMapping(visitId)) ?? visitId;
 }
 
 async function fetchClient(clientId: string) {
@@ -219,11 +231,12 @@ async function syncCheckOut(action: CheckOutAction): Promise<void> {
   const existing = await fetchVisit(payload.visitId);
 
   if (!existing) {
-    console.warn("[Sync] Visit not found for check_out:", payload.visitId);
+    logger.warn("Sync", "Visit not found for check_out:", payload.visitId);
     throw new SyncNotFoundError(payload.visitId);
   }
 
-  await backendApi.patch(`/visits/${payload.visitId}/checkout`, {
+  const resolvedVisitId = await resolveRemoteVisitId(payload.visitId);
+  await backendApi.patch(`/visits/${resolvedVisitId}/checkout`, {
     check_out_at: payload.timestamp,
     check_out_lat: payload.position.lat,
     check_out_lng: payload.position.lng,
@@ -257,13 +270,17 @@ async function syncManualVisitCreate(action: ManualVisitCreateAction): Promise<v
     return;
   }
 
-  await postVisit({
+  const created = await postVisit({
     clientId: payload.clientId,
     clientName: payload.clientName,
     timestamp: payload.timestamp,
     notes: payload.notes,
     visitType: payload.visitType ?? undefined,
   });
+
+  if (created.id !== payload.visitId) {
+    await offlineStorage.setVisitMapping(payload.visitId, created.id);
+  }
 }
 
 async function syncClientCreate(action: ClientCreateAction): Promise<void> {
@@ -291,7 +308,7 @@ async function syncClientUpdate(action: ClientUpdateAction): Promise<void> {
   const existing = await fetchClient(payload.clientId);
 
   if (!existing) {
-    console.warn("[Sync] Client not found for update:", payload.clientId);
+    logger.warn("Sync", "Client not found for update:", payload.clientId);
     throw new SyncNotFoundError(payload.clientId);
   }
 
@@ -334,12 +351,18 @@ async function syncChatSend(action: ChatSendAction): Promise<void> {
     return;
   }
 
+  const attachments =
+    payload.attachments.length > 0
+      ? await Promise.all(payload.attachments.map(uploadChatAttachmentFromQueue))
+      : [];
+
   await backendApi.post("/chat/messages", {
     id: payload.messageId,
     sender_id: payload.senderId,
     receiver_id: payload.receiverId,
     message: payload.message,
     created_at: payload.createdAt,
+    attachments,
   });
 }
 
@@ -358,6 +381,80 @@ async function syncVendorPosition(action: VendorPositionAction): Promise<void> {
   });
 }
 
+async function syncVisitAttachmentUpload(action: VisitAttachmentUploadAction): Promise<void> {
+  const { payload } = action;
+  const resolvedVisitId = await resolveRemoteVisitId(payload.visitId);
+  const existing = await fetchVisit(resolvedVisitId);
+
+  if (!existing) {
+    logger.warn("Sync", "Visit not found for attachment upload:", payload.visitId);
+    throw new SyncNotFoundError(payload.visitId);
+  }
+
+  const uploadTarget = await backendApi.post<{
+    storage_path: string;
+    upload_url: string;
+  }>("/files/visit-attachments/presign-upload", {
+    visit_id: resolvedVisitId,
+    file_name: payload.fileName,
+    mime_type: payload.mimeType,
+    attachment_kind: payload.attachmentKind,
+  });
+
+  await uploadFileFromUri(payload.localUri, uploadTarget.upload_url, payload.mimeType);
+
+  await backendApi.post(`/visits/${resolvedVisitId}/attachments`, {
+    id: payload.attachmentId,
+    storage_path: uploadTarget.storage_path,
+    file_name: payload.fileName,
+    mime_type: payload.mimeType,
+    file_size_bytes: payload.fileSizeBytes,
+    attachment_kind: payload.attachmentKind,
+  });
+}
+
+async function uploadFileFromUri(
+  fileUri: string,
+  uploadUrl: string,
+  mimeType?: string | null,
+) {
+  const response = await fetch(fileUri);
+  const blob = await response.blob();
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": mimeType || "application/octet-stream",
+    },
+    body: blob,
+  });
+
+  if (!uploadResponse.ok) {
+    throw new Error(`Upload failed: HTTP ${uploadResponse.status}`);
+  }
+}
+
+async function uploadChatAttachmentFromQueue(attachment: QueuedChatAttachmentPayload) {
+  const uploadTarget = await backendApi.post<{
+    storage_path: string;
+    upload_url: string;
+  }>("/files/chat-attachments/presign-upload", {
+    file_name: attachment.fileName,
+    mime_type: attachment.mimeType,
+  });
+
+  await uploadFileFromUri(attachment.localUri, uploadTarget.upload_url, attachment.mimeType);
+
+  return {
+    id: attachment.attachmentId,
+    storage_path: uploadTarget.storage_path,
+    file_name: attachment.fileName,
+    mime_type: attachment.mimeType,
+    file_size_bytes: attachment.fileSizeBytes,
+    attachment_kind: attachment.attachmentKind,
+    duration_seconds: attachment.durationSeconds,
+  };
+}
+
 async function postVisit(input: {
   clientId: string | null;
   clientName: string;
@@ -367,7 +464,7 @@ async function postVisit(input: {
   latitude?: number;
   longitude?: number;
 }) {
-  await backendApi.post("/visits", {
+  return backendApi.post<{ id: string }>("/visits", {
     client_id: input.clientId,
     client_name: input.clientName,
     notes: input.notes,
