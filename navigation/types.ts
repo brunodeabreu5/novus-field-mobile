@@ -18,6 +18,7 @@ export type ManagerStackParamList = {
   Alerts: undefined;
   AlertConfig: undefined;
   VisitSettings: undefined;
+  Reports: undefined;
 };
 
 export type RootStackParamList = {

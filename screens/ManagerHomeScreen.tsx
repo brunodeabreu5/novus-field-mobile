@@ -31,6 +31,11 @@ const CARDS = [
     description: "Configurar reglas obligatorias en las visitas",
     route: "VisitSettings",
   },
+  {
+    title: "Reportes",
+    description: "Revisar rendimiento, cobertura y analisis comercial",
+    route: "Reports",
+  },
 ] as const;
 
 export default function ManagerHomeScreen() {

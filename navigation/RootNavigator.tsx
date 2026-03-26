@@ -24,6 +24,7 @@ import VendorDetailScreen from "../screens/VendorDetailScreen";
 import AlertHistoryScreen from "../screens/AlertHistoryScreen";
 import AlertConfigScreen from "../screens/AlertConfigScreen";
 import VisitSettingsScreen from "../screens/VisitSettingsScreen";
+import ReportsScreen from "../screens/ReportsScreen";
 import type { MainTabParamList, ManagerStackParamList, RootStackParamList } from "./types";
 import { colors } from "../theme/colors";
 
@@ -217,6 +218,11 @@ function ManagerStackScreen() {
         name="VisitSettings"
         component={VisitSettingsScreen}
         options={{ title: "Config. de visitas" }}
+      />
+      <ManagerStack.Screen
+        name="Reports"
+        component={ReportsScreen}
+        options={{ title: "Reportes" }}
       />
     </ManagerStack.Navigator>
   );
