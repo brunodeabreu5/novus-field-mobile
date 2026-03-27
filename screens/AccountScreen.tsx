@@ -200,6 +200,9 @@ function TrackingStatusCard({
   if (trackingState === "background") {
     statusText = "Activo en background";
     statusStyle = styles.testValueSuccess;
+  } else if (trackingState === "foreground_only") {
+    statusText = "Solo en primer plano";
+    statusStyle = styles.testValueWarning;
   } else if (trackingState === "denied") {
     statusText = "Bloqueado";
     statusStyle = styles.testError;
@@ -216,6 +219,12 @@ function TrackingStatusCard({
         <Text style={styles.testSubtext}>
           El sistema no concedio el permiso requerido. El vendedor no seguira
           transmitiendo ubicacion hasta autorizarlo.
+        </Text>
+      ) : null}
+      {trackingState === "foreground_only" ? (
+        <Text style={styles.testSubtext}>
+          La app tiene GPS normal, pero todavia no tiene permiso en segundo plano.
+          El rastreo continuo no se activara hasta autorizarlo desde ajustes.
         </Text>
       ) : null}
       {trackingError ? <Text style={styles.testSubtext}>{trackingError}</Text> : null}
@@ -730,8 +739,6 @@ const styles = StyleSheet.create({
   },
   switchTenantText: { color: colors.primary, fontWeight: "600" },
 });
-
-
 
 
 

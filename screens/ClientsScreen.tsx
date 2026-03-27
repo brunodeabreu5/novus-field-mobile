@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,12 +9,13 @@ import {
   TextInput,
   Alert,
 } from "react-native";
+import {
+  Camera,
+  type CameraRef,
+  MapView,
+  PointAnnotation,
+} from "@maplibre/maplibre-react-native";
 import * as Location from "expo-location";
-import MapView, {
-  Marker,
-  type MarkerDragStartEndEvent,
-  type Region,
-} from "react-native-maps";
 import { useAuth } from "../contexts/AuthContext";
 import {
   useClientsData,
@@ -26,6 +27,10 @@ import type { Client } from "../lib/mobile-data";
 import BottomSheetModal from "../components/BottomSheetModal";
 import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
+import MapPin from "../components/MapPin";
+import { getRuntimeConfigWarnings } from "../lib/config";
+import { geocodeAddress } from "../lib/geocoding";
+import { getMapTokenWarning, getMapboxMapStyle } from "../lib/mapbox-tiles";
 import { colors } from "../theme/colors";
 
 const isValidEmail = (email: string): boolean => {
@@ -51,12 +56,15 @@ const emptyForm = {
   longitude: "",
 };
 
-const DEFAULT_REGION: Region = {
+const DEFAULT_ZOOM_LEVEL = 14;
+
+const DEFAULT_VIEWPORT = {
   latitude: -25.2637,
   longitude: -57.5759,
-  latitudeDelta: 0.02,
-  longitudeDelta: 0.02,
+  zoomLevel: 14,
 };
+
+type PickerViewport = typeof DEFAULT_VIEWPORT;
 
 const formatCoordinate = (value: number | null) => {
   if (value === null) {
@@ -77,12 +85,24 @@ const buildClientForm = (client: Client) => ({
   longitude: formatCoordinate(client.longitude),
 });
 
-const buildRegionFromClient = (client: Client): Region => ({
-  latitude: client.latitude ?? DEFAULT_REGION.latitude,
-  longitude: client.longitude ?? DEFAULT_REGION.longitude,
-  latitudeDelta: DEFAULT_REGION.latitudeDelta,
-  longitudeDelta: DEFAULT_REGION.longitudeDelta,
+const buildViewportFromClient = (client: Client): PickerViewport => ({
+  latitude: client.latitude ?? DEFAULT_VIEWPORT.latitude,
+  longitude: client.longitude ?? DEFAULT_VIEWPORT.longitude,
+  zoomLevel: DEFAULT_ZOOM_LEVEL,
 });
+
+function extractCoordinateFromFeature(feature?: GeoJSON.Feature | null) {
+  if (feature?.geometry?.type !== "Point") {
+    return null;
+  }
+
+  const [longitude, latitude] = feature.geometry.coordinates;
+  if (typeof latitude !== "number" || typeof longitude !== "number") {
+    return null;
+  }
+
+  return { latitude, longitude };
+}
 
 async function resolveCurrentLocation() {
   try {
@@ -105,6 +125,7 @@ async function resolveCurrentLocation() {
 
 export default function ClientsScreen() {
   const { user } = useAuth();
+  const cameraRef = useRef<CameraRef | null>(null);
   const { data: clients = [], isLoading } = useClientsData();
   const createClientMutation = useCreateClient();
   const updateClientMutation = useUpdateClient();
@@ -118,7 +139,17 @@ export default function ClientsScreen() {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [addressSearching, setAddressSearching] = useState(false);
   const [form, setForm] = useState(emptyForm);
-  const [pickerRegion, setPickerRegion] = useState<Region>(DEFAULT_REGION);
+  const [pickerViewport, setPickerViewport] = useState<PickerViewport>(DEFAULT_VIEWPORT);
+
+  const mapboxMapStyle = useMemo(() => getMapboxMapStyle(), []);
+  const mapWarnings = useMemo(() => {
+    const warnings = [...getRuntimeConfigWarnings()];
+    const tokenWarning = getMapTokenWarning();
+    if (tokenWarning) {
+      warnings.push(tokenWarning);
+    }
+    return warnings;
+  }, []);
 
   const filtered = useMemo(
     () =>
@@ -136,14 +167,14 @@ export default function ClientsScreen() {
   const openModal = () => {
     setEditingClient(null);
     setForm(emptyForm);
-    setPickerRegion(DEFAULT_REGION);
+    setPickerViewport(DEFAULT_VIEWPORT);
     setModalVisible(true);
   };
 
   const openEditModal = (client: Client) => {
     setEditingClient(client);
     setForm(buildClientForm(client));
-    setPickerRegion(buildRegionFromClient(client));
+    setPickerViewport(buildViewportFromClient(client));
     setModalVisible(true);
   };
 
@@ -151,7 +182,7 @@ export default function ClientsScreen() {
     setModalVisible(false);
     setEditingClient(null);
     setForm(emptyForm);
-    setPickerRegion(DEFAULT_REGION);
+    setPickerViewport(DEFAULT_VIEWPORT);
   };
 
   const updateLocation = (
@@ -165,11 +196,10 @@ export default function ClientsScreen() {
       latitude: latitude.toFixed(6),
       longitude: longitude.toFixed(6),
     }));
-    setPickerRegion((current) => ({
+    setPickerViewport((current) => ({
       latitude,
       longitude,
-      latitudeDelta: current.latitudeDelta || DEFAULT_REGION.latitudeDelta,
-      longitudeDelta: current.longitudeDelta || DEFAULT_REGION.longitudeDelta,
+      zoomLevel: current.zoomLevel || DEFAULT_ZOOM_LEVEL,
     }));
   };
 
@@ -182,12 +212,10 @@ export default function ClientsScreen() {
       const latitude = Number.parseFloat(form.latitude);
       const longitude = Number.parseFloat(form.longitude);
       if (!Number.isNaN(latitude) && !Number.isNaN(longitude)) {
-        setPickerRegion((current) => ({
+        setPickerViewport((current) => ({
           latitude,
           longitude,
-          latitudeDelta: current.latitudeDelta || DEFAULT_REGION.latitudeDelta,
-          longitudeDelta:
-            current.longitudeDelta || DEFAULT_REGION.longitudeDelta,
+          zoomLevel: current.zoomLevel || DEFAULT_ZOOM_LEVEL,
         }));
         return;
       }
@@ -202,25 +230,37 @@ export default function ClientsScreen() {
       }
 
       if (currentPermission !== "granted") {
-        setPickerRegion(DEFAULT_REGION);
+        setPickerViewport(DEFAULT_VIEWPORT);
         return;
       }
 
       const position = await resolveCurrentLocation();
       if (!position) {
-        setPickerRegion(DEFAULT_REGION);
+        setPickerViewport(DEFAULT_VIEWPORT);
         return;
       }
 
       updateLocation(position.coords.latitude, position.coords.longitude);
     } catch {
-      setPickerRegion(DEFAULT_REGION);
+      setPickerViewport(DEFAULT_VIEWPORT);
     }
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     void loadInitialPickerLocation();
   }, [modalVisible]);
+
+  useEffect(() => {
+    if (!modalVisible) {
+      return;
+    }
+
+    cameraRef.current?.setCamera({
+      centerCoordinate: [pickerViewport.longitude, pickerViewport.latitude],
+      zoomLevel: pickerViewport.zoomLevel,
+      animationDuration: 250,
+    });
+  }, [modalVisible, pickerViewport]);
 
   const handleGetGPS = async () => {
     if (!user) {
@@ -280,18 +320,10 @@ export default function ClientsScreen() {
     setAddressSearching(true);
 
     try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-          form.address.trim()
-        )}&limit=1`
-      );
-      const data = (await response.json()) as Array<{
-        lat: string;
-        lon: string;
-        display_name?: string;
-      }>;
-
-      if (!data || data.length === 0) {
+      const result = await geocodeAddress(form.address.trim());
+      updateLocation(result.latitude, result.longitude, result.displayName);
+    } catch (error) {
+      if (error instanceof Error && error.message === "Address not found") {
         Alert.alert(
           "Direccion no encontrada",
           "No fue posible encontrar coordenadas para esta direccion."
@@ -299,12 +331,6 @@ export default function ClientsScreen() {
         return;
       }
 
-      updateLocation(
-        Number.parseFloat(data[0].lat),
-        Number.parseFloat(data[0].lon),
-        data[0].display_name
-      );
-    } catch (error) {
       Alert.alert(
         "Error buscando direccion",
         error instanceof Error
@@ -391,17 +417,30 @@ export default function ClientsScreen() {
     }
   };
 
-  const handleMarkerDragEnd = (event: MarkerDragStartEndEvent) => {
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-    updateLocation(latitude, longitude);
+  const handleMarkerDragEnd = (feature: GeoJSON.Feature) => {
+    const coordinate = extractCoordinateFromFeature(feature);
+    if (!coordinate) {
+      return;
+    }
+
+    updateLocation(coordinate.latitude, coordinate.longitude);
+  };
+
+  const handleMapPress = (feature: GeoJSON.Feature) => {
+    const coordinate = extractCoordinateFromFeature(feature);
+    if (!coordinate) {
+      return;
+    }
+
+    updateLocation(coordinate.latitude, coordinate.longitude);
   };
 
   const selectedCoordinate =
     form.latitude.trim() && form.longitude.trim()
-      ? {
-          latitude: Number.parseFloat(form.latitude),
-          longitude: Number.parseFloat(form.longitude),
-        }
+      ? ([Number.parseFloat(form.longitude), Number.parseFloat(form.latitude)] as [
+          number,
+          number,
+        ])
       : null;
 
   const renderClient = ({ item }: { item: Client }) => (
@@ -521,22 +560,42 @@ export default function ClientsScreen() {
           </TouchableOpacity>
         </View>
 
+        {mapWarnings.length ? (
+          <View style={styles.warningBox}>
+            <Text style={styles.warningTitle}>Revisar configuracion del mapa</Text>
+            <Text style={styles.warningText}>{mapWarnings[0]}</Text>
+          </View>
+        ) : null}
+
         {form.latitude && form.longitude ? (
           <View style={styles.mapWrapper}>
             <MapView
               style={styles.map}
-              region={pickerRegion}
-              onRegionChangeComplete={setPickerRegion}
+              mapStyle={mapboxMapStyle}
+              onPress={handleMapPress}
               scrollEnabled
               zoomEnabled
+              pitchEnabled={false}
+              rotateEnabled={false}
+              logoEnabled={false}
+              attributionEnabled={false}
             >
+              <Camera
+                ref={cameraRef}
+                defaultSettings={{
+                  centerCoordinate: [pickerViewport.longitude, pickerViewport.latitude],
+                  zoomLevel: pickerViewport.zoomLevel,
+                }}
+              />
               {selectedCoordinate ? (
-                <Marker
+                <PointAnnotation
+                  id="client-location"
                   coordinate={selectedCoordinate}
                   draggable
                   onDragEnd={handleMarkerDragEnd}
-                  pinColor={colors.primary}
-                />
+                >
+                  <MapPin color={colors.primary} />
+                </PointAnnotation>
               ) : null}
             </MapView>
             <Text style={styles.coordinatesLabel}>
@@ -550,13 +609,35 @@ export default function ClientsScreen() {
           <View style={styles.mapWrapper}>
             <MapView
               style={styles.map}
-              region={pickerRegion}
-              onRegionChangeComplete={setPickerRegion}
+              mapStyle={mapboxMapStyle}
+              onPress={handleMapPress}
               scrollEnabled
               zoomEnabled
-            />
+              pitchEnabled={false}
+              rotateEnabled={false}
+              logoEnabled={false}
+              attributionEnabled={false}
+            >
+              <Camera
+                ref={cameraRef}
+                defaultSettings={{
+                  centerCoordinate: [pickerViewport.longitude, pickerViewport.latitude],
+                  zoomLevel: pickerViewport.zoomLevel,
+                }}
+              />
+              {selectedCoordinate ? (
+                <PointAnnotation
+                  id="client-location-empty"
+                  coordinate={selectedCoordinate}
+                  draggable
+                  onDragEnd={handleMarkerDragEnd}
+                >
+                  <MapPin color={colors.primary} />
+                </PointAnnotation>
+              ) : null}
+            </MapView>
             <Text style={styles.coordinatesLabel}>
-              Use GPS o busque por direccion para colocar el pin del cliente.
+              Toque el mapa, use GPS o busque por direccion para colocar el pin del cliente.
             </Text>
           </View>
         )}
@@ -664,6 +745,24 @@ const styles = StyleSheet.create({
   primaryActionText: {
     color: colors.primaryForeground,
     fontWeight: "600",
+  },
+  warningBox: {
+    borderWidth: 1,
+    borderColor: colors.warning,
+    backgroundColor: colors.warningMuted,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  warningTitle: {
+    color: colors.foreground,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  warningText: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    lineHeight: 18,
   },
   coordinatesBox: {
     borderWidth: 1,

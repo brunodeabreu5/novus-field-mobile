@@ -247,19 +247,11 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signUp(email: string, password: string, fullName: string) {
-  try {
-    const response = await request<BackendAuthResponse>("/auth/signup", {
-      method: "POST",
-      body: JSON.stringify({ email, password, fullName }),
-    });
-    return storeAuthResponse(response);
-  } catch {
-    const response = await request<BackendAuthResponse>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-    return storeAuthResponse(response);
-  }
+  const response = await request<BackendAuthResponse>("/auth/signup", {
+    method: "POST",
+    body: JSON.stringify({ email, password, fullName }),
+  });
+  return storeAuthResponse(response);
 }
 
 export async function signOut() {

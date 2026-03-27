@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useDevicePermissions } from "../contexts/DevicePermissionsContext";
 import type { TrackingState } from "../providers/TrackingProvider";
@@ -7,46 +6,13 @@ import { useGeofence } from "./use-geofence";
 
 export function useTrackingBootstrap() {
   const { user, profile, session, isVendor } = useAuth();
-  const {
-    locationPermission,
-    backgroundLocationPermission,
-    requestBackgroundLocationPermission,
-  } = useDevicePermissions();
-  const requestedPermissionRef = useRef<string | null>(null);
+  const { locationPermission, backgroundLocationPermission } = useDevicePermissions();
   const canTrack =
     !!user &&
     !!session &&
     isVendor &&
     locationPermission === "granted" &&
     backgroundLocationPermission === "granted";
-
-  useEffect(() => {
-    if (!user || !isVendor) {
-      requestedPermissionRef.current = null;
-      return;
-    }
-
-    if (
-      locationPermission === "granted" &&
-      backgroundLocationPermission === "granted"
-    ) {
-      requestedPermissionRef.current = null;
-      return;
-    }
-
-    if (requestedPermissionRef.current === user.id) {
-      return;
-    }
-
-    requestedPermissionRef.current = user.id;
-    void requestBackgroundLocationPermission();
-  }, [
-    backgroundLocationPermission,
-    isVendor,
-    locationPermission,
-    requestBackgroundLocationPermission,
-    user,
-  ]);
 
   const { error: trackingError } = useVendorTracking({
     enabled: canTrack,
@@ -63,11 +29,10 @@ export function useTrackingBootstrap() {
 
   let effectiveTrackingState: TrackingState = null;
   if (user && isVendor) {
-    if (
-      locationPermission !== "granted" ||
-      backgroundLocationPermission !== "granted"
-    ) {
+    if (locationPermission !== "granted") {
       effectiveTrackingState = "denied";
+    } else if (backgroundLocationPermission !== "granted") {
+      effectiveTrackingState = "foreground_only";
     } else if (trackingError || geofenceError) {
       effectiveTrackingState = "error";
     } else {
@@ -76,13 +41,11 @@ export function useTrackingBootstrap() {
   }
 
   let trackingErrorMessage = trackingError ?? geofenceError;
-  if (
-    user &&
-    isVendor &&
-    (locationPermission !== "granted" ||
-      backgroundLocationPermission !== "granted")
-  ) {
-    trackingErrorMessage = "Permiso de ubicacion en segundo plano requerido";
+  if (user && isVendor && locationPermission !== "granted") {
+    trackingErrorMessage = "Permiso de ubicacion requerido";
+  } else if (user && isVendor && backgroundLocationPermission !== "granted") {
+    trackingErrorMessage =
+      "Active la ubicacion en segundo plano para habilitar rastreo automatico continuo.";
   }
 
   return {

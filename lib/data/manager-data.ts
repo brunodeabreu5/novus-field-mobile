@@ -1,5 +1,9 @@
 import { backendApi } from "../backend-api";
-import { computeTrackingStats, type TrackPoint } from "../tracking-history";
+import {
+  buildTrackPointsFromVendorPositions,
+  sortVendorPositionsByRecordedAtDesc,
+} from "../manager-map-utils";
+import { computeTrackingStats } from "../tracking-history";
 import type {
   ManagerNotification,
   VendorPosition,
@@ -12,7 +16,8 @@ export async function fetchAlerts(userId: string): Promise<ManagerNotification[]
 }
 
 export async function fetchLatestVendorPositions(): Promise<VendorPosition[]> {
-  return backendApi.get<VendorPosition[]>("/tracking/positions/latest?limit=100");
+  const rows = await backendApi.get<VendorPosition[]>("/tracking/positions/latest?limit=100");
+  return sortVendorPositionsByRecordedAtDesc(rows);
 }
 
 export async function fetchVendorProfiles(): Promise<VendorProfile[]> {
@@ -33,17 +38,7 @@ export async function fetchVendorRouteHistory(
   const allRows = await backendApi.get<VendorPosition[]>(
     `/tracking/history?vendorId=${vendorId}&date=${date}`,
   );
-
-  const trail: TrackPoint[] = allRows.map((row) => ({
-    lat: row.latitude,
-    lng: row.longitude,
-    accuracy: row.accuracy_meters ?? 0,
-    speedKmh: row.speed_kmh ?? 0,
-    heading: row.heading ?? null,
-    isIdle: row.is_idle ?? false,
-    idleDurationSec: row.idle_duration_seconds ?? 0,
-    timestamp: new Date(row.recorded_at),
-  }));
+  const trail = buildTrackPointsFromVendorPositions(allRows);
 
   return {
     trail,

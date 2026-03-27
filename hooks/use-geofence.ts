@@ -337,6 +337,7 @@ export function useGeofence(options: UseGeofenceOptions) {
 
   const insideZonesRef = useRef<Set<string>>(new Set());
   const activeVisitsRef = useRef<Map<string, VisitCheckIn>>(new Map());
+  const runInFlightRef = useRef(false);
 
   useEffect(() => {
     if (enabled && vendorId) {
@@ -419,7 +420,7 @@ export function useGeofence(options: UseGeofenceOptions) {
           const lng = client?.longitude;
 
           if (lat == null || lng == null || lat === 0 || lng === 0) {
-            console.warn(`[Geofence] Zone ${config.zone_id} has invalid coordinates`);
+            logger.warn("Geofence", `Zone ${config.zone_id} has invalid coordinates`);
             continue;
           }
 
@@ -456,42 +457,59 @@ export function useGeofence(options: UseGeofenceOptions) {
     let cancelled = false;
 
     const run = async () => {
-      const loc = await resolveCurrentPosition();
-      if (!loc) {
+      if (runInFlightRef.current) {
         return;
       }
 
-      const position: GeoPosition = {
-        lat: loc.coords.latitude,
-        lng: loc.coords.longitude,
-        accuracy: loc.coords.accuracy ?? 20,
-      };
+      runInFlightRef.current = true;
 
-      setCurrentPosition(position);
-      setError(null);
+      try {
+        const loc = await resolveCurrentPosition();
+        if (!loc) {
+          return;
+        }
 
-      const result = await processGeofencePosition({
-        position,
-        zones,
-        autoCheckIn,
-        vendorId,
-        vendorName,
-        insideZones: insideZonesRef.current,
-        activeVisits: activeVisitsRef.current,
-      });
+        const position: GeoPosition = {
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+          accuracy: loc.coords.accuracy ?? 20,
+        };
 
-      insideZonesRef.current = result.insideZones;
-      activeVisitsRef.current = result.activeVisits;
+        setCurrentPosition(position);
+        setError(null);
 
-      if (!cancelled) {
-        setActiveVisits(Array.from(result.activeVisits.values()));
+        const result = await processGeofencePosition({
+          position,
+          zones,
+          autoCheckIn,
+          vendorId,
+          vendorName,
+          insideZones: insideZonesRef.current,
+          activeVisits: activeVisitsRef.current,
+        });
+
+        insideZonesRef.current = result.insideZones;
+        activeVisitsRef.current = result.activeVisits;
+
+        if (!cancelled) {
+          setActiveVisits(Array.from(result.activeVisits.values()));
+        }
+
+        await persistGeofenceRuntimeState({
+          zones,
+          insideZones: result.insideZones,
+          activeVisits: result.activeVisits,
+        });
+      } catch (runError) {
+        logger.warn("Geofence", "Failed to process geofence loop", runError);
+        if (!cancelled) {
+          setError(
+            runError instanceof Error ? runError.message : "Failed to process geofence",
+          );
+        }
+      } finally {
+        runInFlightRef.current = false;
       }
-
-      await persistGeofenceRuntimeState({
-        zones,
-        insideZones: result.insideZones,
-        activeVisits: result.activeVisits,
-      });
     };
 
     void run();
@@ -512,6 +530,12 @@ export function useGeofence(options: UseGeofenceOptions) {
         };
         activeVisitsRef.current.delete(zoneId);
         setActiveVisits(Array.from(activeVisitsRef.current.values()));
+        void persistGeofenceRuntimeState({
+          insideZones: insideZonesRef.current,
+          activeVisits: activeVisitsRef.current,
+        }).catch((persistError) => {
+          logger.warn("Geofence", "Failed to persist manual check-out state", persistError);
+        });
         void offlineStorage
           .enqueue({
             type: "check_out",

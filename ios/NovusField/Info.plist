@@ -52,6 +52,8 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your camera</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>NovusField usa Face ID para desbloquear el acceso a la sesion guardada.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>NovusField necesita acceso continuo a la ubicacion para registrar recorridos y visitas en segundo plano.</string>
     <key>NSLocationAlwaysUsageDescription</key>
@@ -59,7 +61,7 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>NovusField necesita su ubicacion para registrar visitas y tracking en campo.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <string>NovusField necesita acceso al microfono para grabar audios en el chat.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your photos</string>
     <key>RCTNewArchEnabled</key>

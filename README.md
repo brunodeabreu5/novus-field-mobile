@@ -16,16 +16,19 @@ App móvel nativo para Novus Field, sem WebView. Gestão de visitas, clientes, c
 cp .env.example .env
 ```
 
-2. Editar `.env` com a URL do backend:
+2. Editar `.env` com a URL do backend e o token do **Mapbox** usado nas telas com mapa:
 
 ```
+EXPO_PUBLIC_MAPBOX_TOKEN=seu_token_publico_mapbox
 EXPO_PUBLIC_API_URL=http://localhost:4000/api
 EXPO_PUBLIC_WS_URL=http://localhost:4000
 # Opcional: só defina se você tiver um UUID real do projeto Expo/EAS para push
 # EXPO_PUBLIC_PROJECT_ID=
 ```
 
-3. Instalar dependências:
+3. **Mapas (MapLibre + estilo Mapbox):** o app usa `@maplibre/maplibre-react-native` com estilo raster do Mapbox via `EXPO_PUBLIC_MAPBOX_TOKEN`. Depois de instalar dependências ou trocar a configuração nativa, faça rebuild (`npm run android` / `npm run ios`).
+
+4. Instalar dependências:
 
 ```bash
 npm install

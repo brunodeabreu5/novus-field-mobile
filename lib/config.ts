@@ -1,6 +1,9 @@
 import Constants from "expo-constants";
 import { deriveBackendWsUrl } from "./config-utils";
 
+const DEV_BACKEND_API_URL = "http://localhost:4000/api";
+const DEV_CONTROL_API_URL = "http://localhost:4010/api";
+
 const INVALID_PROJECT_ID_VALUES = new Set([
   "",
   "your-expo-project-id",
@@ -34,8 +37,25 @@ export function getExpoProjectId(): string | undefined {
   return normalizeProjectId(process.env.EXPO_PUBLIC_PROJECT_ID);
 }
 
+function isLoopbackUrl(value: string): boolean {
+  return /https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)([:/]|$)/i.test(value);
+}
+
+function resolveRequiredUrl(value: string | undefined, fallback: string, label: string): string {
+  const trimmed = value?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+
+  if (__DEV__) {
+    return fallback;
+  }
+
+  throw new Error(`${label} is required in the app environment.`);
+}
+
 export function resolveBackendApiUrl(): string {
-  return process.env.EXPO_PUBLIC_API_URL?.trim() || "http://localhost:4000/api";
+  return resolveRequiredUrl(process.env.EXPO_PUBLIC_API_URL, DEV_BACKEND_API_URL, "EXPO_PUBLIC_API_URL");
 }
 
 export function resolveBackendWsUrl(): string {
@@ -43,5 +63,45 @@ export function resolveBackendWsUrl(): string {
 }
 
 export function resolveControlApiUrl(): string {
-  return process.env.EXPO_PUBLIC_CONTROL_API_URL?.trim() || "http://localhost:4010/api";
+  return resolveRequiredUrl(
+    process.env.EXPO_PUBLIC_CONTROL_API_URL,
+    DEV_CONTROL_API_URL,
+    "EXPO_PUBLIC_CONTROL_API_URL"
+  );
+}
+
+export function getRuntimeConfigWarnings(): string[] {
+  const warnings: string[] = [];
+  const backendUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+  const controlUrl = process.env.EXPO_PUBLIC_CONTROL_API_URL?.trim();
+
+  if (!backendUrl) {
+    warnings.push(`EXPO_PUBLIC_API_URL is not set. Using ${DEV_BACKEND_API_URL} in development.`);
+  } else if (isLoopbackUrl(backendUrl)) {
+    warnings.push("EXPO_PUBLIC_API_URL points to localhost/loopback and will not work on most physical devices.");
+  }
+
+  if (!controlUrl) {
+    warnings.push(
+      `EXPO_PUBLIC_CONTROL_API_URL is not set. Using ${DEV_CONTROL_API_URL} in development.`
+    );
+  } else if (isLoopbackUrl(controlUrl)) {
+    warnings.push(
+      "EXPO_PUBLIC_CONTROL_API_URL points to localhost/loopback and will not work on most physical devices."
+    );
+  }
+
+  return warnings;
+}
+
+export {
+  resolveMapboxToken,
+  getMapboxRasterTileUrlTemplate,
+  getMapboxMapStyle,
+} from "./mapbox-tiles";
+
+export function resolveApiTimeoutMs(): number {
+  const timeout = process.env.EXPO_PUBLIC_API_TIMEOUT_MS;
+  const parsed = parseInt(timeout || "", 10);
+  return isNaN(parsed) ? 30_000 : Math.max(5_000, Math.min(120_000, parsed));
 }

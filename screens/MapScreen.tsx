@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Camera,
+  type CameraRef,
+  LineLayer,
+  MapView,
+  PointAnnotation,
+  ShapeSource,
+  UserLocation,
+  UserLocationRenderMode,
+} from "@maplibre/maplibre-react-native";
+import {
   View,
   Text,
   StyleSheet,
@@ -9,7 +19,6 @@ import {
   TouchableOpacity,
   TextInput,
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
@@ -19,6 +28,9 @@ import {
   useVendorsData,
   useVendorRouteHistory,
 } from "../hooks/use-mobile-data";
+import MapPin from "../components/MapPin";
+import { getRuntimeConfigWarnings } from "../lib/config";
+import { getMapboxMapStyle } from "../lib/mapbox-tiles";
 import { colors } from "../theme/colors";
 
 function formatDuration(minutesOrSeconds: number, unit: "minutes" | "seconds") {
@@ -36,7 +48,7 @@ function formatDuration(minutesOrSeconds: number, unit: "minutes" | "seconds") {
 
 export default function MapScreen() {
   const { isManagerOrAdmin } = useAuth();
-  const mapRef = useRef<MapView | null>(null);
+  const cameraRef = useRef<CameraRef | null>(null);
   const replayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [selectedVendorId, setSelectedVendorId] = useState<string>("");
   const [historyDate, setHistoryDate] = useState(
@@ -44,6 +56,9 @@ export default function MapScreen() {
   );
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayRunning, setReplayRunning] = useState(false);
+
+  const mapboxMapStyle = useMemo(() => getMapboxMapStyle(), []);
+  const configWarnings = useMemo(() => getRuntimeConfigWarnings(), []);
 
   const { data: positions = [], isLoading: isLoadingPositions } =
     useVendorPositions(isManagerOrAdmin);
@@ -57,7 +72,11 @@ export default function MapScreen() {
 
   const latestByVendor = useMemo(() => {
     return positions.reduce((acc, position) => {
-      if (!acc[position.vendor_id]) {
+      const current = acc[position.vendor_id];
+      if (
+        !current ||
+        new Date(position.recorded_at).getTime() > new Date(current.recorded_at).getTime()
+      ) {
         acc[position.vendor_id] = position;
       }
       return acc;
@@ -84,6 +103,20 @@ export default function MapScreen() {
   const trail = history?.trail || [];
   const historyStats = history?.stats || null;
   const replayPoint = trail[replayIndex] || null;
+  const trailLine = useMemo<GeoJSON.Feature<GeoJSON.LineString> | null>(() => {
+    if (trail.length < 2) {
+      return null;
+    }
+
+    return {
+      type: "Feature",
+      properties: {},
+      geometry: {
+        type: "LineString",
+        coordinates: trail.map((point) => [point.lng, point.lat]),
+      },
+    };
+  }, [trail]);
 
   useEffect(() => {
     if (!selectedVendorId && vendors.length > 0) {
@@ -101,16 +134,15 @@ export default function MapScreen() {
       return;
     }
 
-    const coordinates = trail.map((point) => ({
-      latitude: point.lat,
-      longitude: point.lng,
-    }));
+    const latitudes = trail.map((point) => point.lat);
+    const longitudes = trail.map((point) => point.lng);
+    const north = Math.max(...latitudes);
+    const south = Math.min(...latitudes);
+    const east = Math.max(...longitudes);
+    const west = Math.min(...longitudes);
 
     requestAnimationFrame(() => {
-      mapRef.current?.fitToCoordinates(coordinates, {
-        edgePadding: { top: 80, right: 80, bottom: 80, left: 80 },
-        animated: true,
-      });
+      cameraRef.current?.fitBounds([east, north], [west, south], 80, 600);
     });
   }, [trail]);
 
@@ -173,66 +205,93 @@ export default function MapScreen() {
       <View style={styles.mapCard}>
         <Text style={styles.sectionTitle}>Mapa en vivo</Text>
         <MapView
-          ref={mapRef}
           style={styles.map}
-          initialRegion={defaultRegion}
-          showsUserLocation
-          showsMyLocationButton
+          mapStyle={mapboxMapStyle}
+          scrollEnabled
+          zoomEnabled
+          pitchEnabled={false}
+          rotateEnabled={false}
+          attributionEnabled={false}
+          logoEnabled={false}
         >
+          <Camera
+            ref={cameraRef}
+            defaultSettings={{
+              centerCoordinate: [defaultRegion.longitude, defaultRegion.latitude],
+              zoomLevel: 10,
+            }}
+          />
+          <UserLocation visible renderMode={UserLocationRenderMode.Normal} />
+
           {liveMarkers.map((position) => (
-            <Marker
+            <PointAnnotation
               key={position.id}
-              coordinate={{
-                latitude: position.latitude,
-                longitude: position.longitude,
-              }}
+              id={`live-${position.id}`}
+              coordinate={[position.longitude, position.latitude]}
               title={position.vendorName}
-              description={new Date(position.recorded_at).toLocaleString("es-PY")}
-              pinColor={colors.primary}
-            />
+              snippet={new Date(position.recorded_at).toLocaleString("es-PY")}
+            >
+              <MapPin
+                color={colors.primary}
+                label={(position.vendorName || "V").slice(0, 1).toUpperCase()}
+                size="sm"
+              />
+            </PointAnnotation>
           ))}
 
-          {trail.length >= 2 ? (
-            <Polyline
-              coordinates={trail.map((point) => ({
-                latitude: point.lat,
-                longitude: point.lng,
-              }))}
-              strokeColor={colors.primary}
-              strokeWidth={4}
-            />
+          {trailLine ? (
+            <ShapeSource id="trail-source" shape={trailLine}>
+              <LineLayer
+                id="trail-line"
+                style={{
+                  lineColor: colors.primary,
+                  lineWidth: 4,
+                  lineCap: "round",
+                  lineJoin: "round",
+                }}
+              />
+            </ShapeSource>
           ) : null}
 
           {trail[0] ? (
-            <Marker
-              coordinate={{ latitude: trail[0].lat, longitude: trail[0].lng }}
+            <PointAnnotation
+              id="trail-start"
+              coordinate={[trail[0].lng, trail[0].lat]}
               title="Inicio"
-              pinColor={colors.success}
-            />
+            >
+              <MapPin color={colors.success} label="I" size="sm" />
+            </PointAnnotation>
           ) : null}
 
           {trail.length > 1 ? (
-            <Marker
-              coordinate={{
-                latitude: trail[trail.length - 1].lat,
-                longitude: trail[trail.length - 1].lng,
-              }}
+            <PointAnnotation
+              id="trail-end"
+              coordinate={[trail[trail.length - 1].lng, trail[trail.length - 1].lat]}
               title="Fin"
-              pinColor={colors.destructive}
-            />
+            >
+              <MapPin color={colors.destructive} label="F" size="sm" />
+            </PointAnnotation>
           ) : null}
 
           {replayPoint ? (
-            <Marker
-              coordinate={{ latitude: replayPoint.lat, longitude: replayPoint.lng }}
+            <PointAnnotation
+              id="trail-replay"
+              coordinate={[replayPoint.lng, replayPoint.lat]}
               title="Replay"
-              description={format(replayPoint.timestamp, "dd MMM yyyy HH:mm", {
+              snippet={format(replayPoint.timestamp, "dd MMM yyyy HH:mm", {
                 locale: es,
               })}
-              pinColor={colors.warning}
-            />
+            >
+              <MapPin color={colors.warning} label="R" size="sm" />
+            </PointAnnotation>
           ) : null}
         </MapView>
+        {configWarnings.length ? (
+          <View style={styles.warningBox}>
+            <Text style={styles.warningTitle}>Revisar configuracion</Text>
+            <Text style={styles.warningText}>{configWarnings[0]}</Text>
+          </View>
+        ) : null}
         <View style={styles.legend}>
           <Text style={styles.legendText}>
             {liveMarkers.length} ubicaciones activas
@@ -426,6 +485,24 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 14,
     color: colors.mutedForeground,
+  },
+  warningBox: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    backgroundColor: colors.warningMuted,
+    borderRadius: 12,
+    padding: 12,
+  },
+  warningTitle: {
+    color: colors.foreground,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  warningText: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    lineHeight: 18,
   },
   panel: {
     backgroundColor: colors.card,

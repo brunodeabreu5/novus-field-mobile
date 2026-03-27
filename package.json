@@ -15,6 +15,7 @@
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@hookform/resolvers": "^5.2.2",
+    "@maplibre/maplibre-react-native": "^10.4.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/bottom-tabs": "^7.15.5",
     "@react-navigation/native": "^7.1.33",
@@ -33,15 +34,16 @@
     "expo-local-authentication": "~17.0.8",
     "expo-location": "~19.0.8",
     "expo-notifications": "~0.32.16",
+    "expo-secure-store": "^55.0.9",
     "expo-sharing": "~14.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-task-manager": "~14.0.8",
+    "novus-field-types": "file:../novus-field-types",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-hook-form": "^7.71.2",
     "react-native": "0.81.5",
-    "react-native-maps": "1.20.1",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
     "react-native-web": "^0.21.0",
@@ -50,6 +52,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.10",
+    "eas-cli": "^18.4.0",
     "typescript": "~5.9.2"
   },
   "private": true
