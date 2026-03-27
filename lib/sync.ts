@@ -126,6 +126,8 @@ export function isOfflineLikeError(error: unknown): boolean {
     normalized.includes("network request failed") ||
     normalized.includes("network error") ||
     normalized.includes("fetch failed") ||
+    normalized.includes("timeout") ||
+    normalized.includes("aborterror") ||
     normalized.includes("offline")
   );
 }

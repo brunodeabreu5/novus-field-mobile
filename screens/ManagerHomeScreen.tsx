@@ -4,6 +4,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ManagerStackParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
+import { spacing, fontSize, radius } from "../theme/spacing";
 
 const CARDS = [
   {
@@ -58,16 +59,18 @@ export default function ManagerHomeScreen() {
   );
 }
 
+const s = spacing; const f = fontSize; const r = radius;
+
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
+  container: { flex: 1, padding: s.md },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 16,
+    borderRadius: r.lg,
+    padding: s.lg,
+    marginBottom: s.md,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  title: { fontSize: 18, fontWeight: "700", color: colors.foreground },
-  desc: { fontSize: 14, color: colors.mutedForeground, marginTop: 4 },
+  title: { fontSize: f.lg, fontWeight: "700", color: colors.foreground },
+  desc: { fontSize: f.base, color: colors.mutedForeground, marginTop: 4 },
 });

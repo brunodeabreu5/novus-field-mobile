@@ -7,10 +7,13 @@ import type {
   ChatAttachment,
   ChatAttachmentKind,
   ChatMessage,
+  ChatMessagesPage,
   ChatReaction,
   Contact,
   DraftChatAttachment,
 } from "./types";
+
+const CHAT_MESSAGES_PAGE_SIZE = 40;
 
 const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -110,15 +113,32 @@ export async function fetchContacts(userId: string, _canSeePresence = false): Pr
     });
 }
 
-export async function fetchMessages(userId: string, otherUserId: string): Promise<ChatMessage[]> {
-  const messages = await backendApi.get<ChatMessage[]>(
-    `/chat/messages?otherUserId=${encodeURIComponent(otherUserId)}`,
+export async function fetchMessagesPage(input: {
+  userId: string;
+  otherUserId: string;
+  cursor?: string | null;
+}): Promise<ChatMessagesPage> {
+  const params = new URLSearchParams({
+    otherUserId: input.otherUserId,
+    limit: String(CHAT_MESSAGES_PAGE_SIZE),
+  });
+
+  if (input.cursor) {
+    params.set("cursor", input.cursor);
+  }
+
+  const page = await backendApi.get<ChatMessagesPage>(
+    `/chat/messages?${params.toString()}`,
   );
 
-  return messages.map(normalizeMessage);
+  return {
+    items: page.items.map(normalizeMessage),
+    nextCursor: page.nextCursor,
+  };
 }
 
 export async function sendChatMessage(input: {
+  messageId?: string;
   senderId: string;
   receiverId: string;
   message: string;
@@ -132,7 +152,7 @@ export async function sendChatMessage(input: {
   }
 
   const optimisticMessage: ChatMessage = {
-    id: generateId(),
+    id: input.messageId || generateId(),
     sender_id: input.senderId,
     receiver_id: input.receiverId,
     message: trimmedMessage,
@@ -142,6 +162,10 @@ export async function sendChatMessage(input: {
     attachments: [],
     reactions: [],
     queued: false,
+    retryPayload: {
+      message: trimmedMessage,
+      attachments,
+    },
   };
 
   try {
@@ -163,7 +187,14 @@ export async function sendChatMessage(input: {
       attachments: uploadedAttachments,
     });
 
-    return { ...normalizeMessage(created), queued: false as const };
+    return {
+      ...normalizeMessage(created),
+      queued: false as const,
+      retryPayload: {
+        message: trimmedMessage,
+        attachments,
+      },
+    };
   } catch (error) {
     if (isOfflineLikeError(error)) {
       await offlineStorage.enqueue({

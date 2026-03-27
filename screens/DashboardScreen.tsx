@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     marginBottom: s.md,
   },
   errorBox: {
-    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    backgroundColor: colors.destructiveMuted,
     borderRadius: r.md,
     padding: s.md,
     marginBottom: s.md,

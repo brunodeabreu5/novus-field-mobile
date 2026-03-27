@@ -333,12 +333,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   errorBox: {
-    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    backgroundColor: colors.destructiveMuted,
     borderRadius: r.sm,
     padding: s.md,
     marginBottom: s.md,
     borderWidth: 1,
-    borderColor: "rgba(239, 68, 68, 0.3)",
+    borderColor: colors.destructiveMuted,
   },
   errorText: {
     color: colors.destructive,

@@ -1,4 +1,5 @@
 import { getAccessToken } from "./backend-auth";
+import { resolveApiTimeoutMs } from "./config";
 import { getBackendApiUrl } from "./tenant-config";
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -8,14 +9,29 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 
   const apiUrl = await getBackendApiUrl();
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-      ...(init.headers || {}),
-    },
-  });
+  const controller = new AbortController();
+  const timeoutMs = resolveApiTimeoutMs();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as

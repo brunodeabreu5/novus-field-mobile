@@ -52,6 +52,16 @@ export interface ChatMessage extends ChatMessageRow {
   attachments: ChatAttachment[];
   reactions: ChatReaction[];
   queued?: boolean;
+  deliveryStatus?: "sending" | "queued" | "failed" | "sent";
+  retryPayload?: {
+    message: string;
+    attachments: DraftChatAttachment[];
+  };
+}
+
+export interface ChatMessagesPage {
+  items: ChatMessage[];
+  nextCursor: string | null;
 }
 
 export interface DraftChatAttachment {

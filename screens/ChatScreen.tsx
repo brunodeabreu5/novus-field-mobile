@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -34,12 +34,15 @@ import {
   useOpenChatAttachment,
   useSendChatMessage,
   useToggleChatReaction,
-  useUpdateChatPresence,
 } from "../hooks/use-mobile-data";
 import type { ChatAttachment, ChatMessage, Contact, DraftChatAttachment } from "../lib/mobile-data";
 import { getBackendWsUrl } from "../lib/tenant-config";
+import { logger } from "../lib/logger";
 import type { MainTabParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
+import { spacing, fontSize, radius } from "../theme/spacing";
+
+const s = spacing; const f = fontSize; const r = radius;
 
 const EMOJI_OPTIONS = ["😀", "😂", "😍", "👍", "🔥", "🎉", "🙏", "😎"];
 type ExpoAudioModule = typeof import("expo-av").Audio;
@@ -98,6 +101,26 @@ function groupReactions(message: ChatMessage) {
   return Array.from(grouped.values());
 }
 
+function getMessageStatusLabel(message: ChatMessage) {
+  if (message.deliveryStatus === "sending") {
+    return "Enviando...";
+  }
+
+  if (message.deliveryStatus === "failed") {
+    return "Falhou";
+  }
+
+  if (message.deliveryStatus === "queued" || message.queued) {
+    return "Pendente de sync";
+  }
+
+  if (message.deliveryStatus === "sent") {
+    return "Enviado";
+  }
+
+  return null;
+}
+
 export default function ChatScreen() {
   const { user } = useAuth();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, "Chat">>();
@@ -116,6 +139,7 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList>(null);
   const soundRef = useRef<SoundHandle | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const selectedContactRef = useRef<Contact | null>(null);
 
   const {
     data: contacts = [],
@@ -123,15 +147,26 @@ export default function ChatScreen() {
     refetch: refetchContacts,
   } = useContactsData(user?.id);
   const {
-    data: messages = [],
+    data: messagesData,
     isLoading: messagesLoading,
     refetch: refetchMessages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
   } = useMessagesData(user?.id, selectedContact?.id);
   const sendChatMessageMutation = useSendChatMessage();
   const markConversationAsReadMutation = useMarkConversationAsRead();
   const toggleReactionMutation = useToggleChatReaction();
   const openChatAttachmentMutation = useOpenChatAttachment();
-  const updateChatPresenceMutation = useUpdateChatPresence();
+
+  useEffect(() => {
+    selectedContactRef.current = selectedContact;
+  }, [selectedContact]);
+
+  const messages = useMemo(
+    () => messagesData?.pages.flatMap((page) => page.items) ?? [],
+    [messagesData],
+  );
 
   const filteredContacts = useMemo(() => {
     if (!contactSearch.trim()) {
@@ -160,9 +195,12 @@ export default function ChatScreen() {
       }
     });
 
-    return Array.from(map.values()).sort((left, right) =>
-      left.created_at.localeCompare(right.created_at)
-    );
+    return Array.from(map.values())
+      .sort((left, right) => left.created_at.localeCompare(right.created_at))
+      .map((message) => ({
+        ...message,
+        deliveryStatus: message.deliveryStatus ?? (message.queued ? "queued" : "sent"),
+      }));
   }, [messages, queuedMessages]);
 
   useEffect(() => {
@@ -208,6 +246,7 @@ export default function ChatScreen() {
           })),
           reactions: [],
           queued: true,
+          deliveryStatus: "queued",
         }));
 
       if (!cancelled) {
@@ -262,6 +301,14 @@ export default function ChatScreen() {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
   }, [messages.length, selectedContact]);
 
+  const handleLoadOlderMessages = useCallback(() => {
+    if (!selectedContact || !hasNextPage || isFetchingNextPage) {
+      return;
+    }
+
+    void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, selectedContact]);
+
   useEffect(() => {
     if (!user || !selectedContact) return;
 
@@ -270,21 +317,6 @@ export default function ChatScreen() {
       otherUserId: selectedContact.id,
     });
   }, [markConversationAsReadMutation, selectedContact, user]);
-
-  useEffect(() => {
-    if (!user) return;
-
-    updateChatPresenceMutation.mutate({ userId: user.id });
-    const interval = setInterval(() => {
-      updateChatPresenceMutation.mutate({ userId: user.id });
-      refetchContacts();
-      if (selectedContact) {
-        refetchMessages();
-      }
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [refetchContacts, refetchMessages, selectedContact, updateChatPresenceMutation, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -305,23 +337,31 @@ export default function ChatScreen() {
       socket.on("chat:message", (payload: Record<string, unknown>) => {
         const senderId = typeof payload.sender_id === "string" ? payload.sender_id : null;
         const receiverId = typeof payload.receiver_id === "string" ? payload.receiver_id : null;
-        if (selectedContact && (senderId === selectedContact.id || receiverId === selectedContact.id)) {
+        const currentSelectedContact = selectedContactRef.current;
+        if (
+          currentSelectedContact &&
+          (senderId === currentSelectedContact.id || receiverId === currentSelectedContact.id)
+        ) {
           refetchMessages();
         }
         refetchContacts();
       });
 
       socket.on("chat:read", () => {
-        if (selectedContact) {
+        if (selectedContactRef.current) {
           refetchMessages();
         }
         refetchContacts();
       });
 
       socket.on("chat:reaction", () => {
-        if (selectedContact) {
+        if (selectedContactRef.current) {
           refetchMessages();
         }
+      });
+
+      socket.on("connect_error", (error) => {
+        logger.warn("Chat", "Socket connection error", error.message);
       });
 
       socket.on("chat:presence", () => {
@@ -336,7 +376,7 @@ export default function ChatScreen() {
       socketRef.current?.disconnect();
       socketRef.current = null;
     };
-  }, [refetchContacts, refetchMessages, selectedContact, user]);
+  }, [refetchContacts, refetchMessages, user]);
 
   const removeDraftAttachment = (uri: string) => {
     setDraftAttachments((current) => current.filter((attachment) => attachment.uri !== uri));
@@ -572,6 +612,29 @@ export default function ChatScreen() {
     }
   };
 
+  const retryMessage = async (message: ChatMessage) => {
+    if (!user || message.sender_id !== user.id || !message.retryPayload) {
+      return;
+    }
+
+    try {
+      await sendChatMessageMutation.mutateAsync({
+        messageId: message.id,
+        senderId: message.sender_id,
+        receiverId: message.receiver_id,
+        message: message.retryPayload.message,
+        attachments: message.retryPayload.attachments,
+      });
+      refetchContacts();
+      refetchMessages();
+    } catch (error) {
+      Alert.alert(
+        "Chat",
+        error instanceof Error ? error.message : "No se pudo reenviar la mensagem.",
+      );
+    }
+  };
+
   const handleChangeMessage = (value: string) => {
     setNewMessage(value);
     if (!selectedContact || !socketRef.current) return;
@@ -712,8 +775,10 @@ export default function ChatScreen() {
         ) : (
           <FlatList
             ref={listRef}
-             data={mergedMessages}
+            data={mergedMessages}
             keyExtractor={(item) => item.id}
+            onEndReachedThreshold={0.15}
+            onEndReached={handleLoadOlderMessages}
             renderItem={({ item }) => {
               const groupedReactions = groupReactions(item);
 
@@ -822,18 +887,41 @@ export default function ChatScreen() {
                       </Pressable>
                     ))}
 
-                    <Text
-                      style={[
-                        styles.bubbleTime,
-                        item.sender_id === user?.id
-                          ? styles.bubbleTimeMe
-                          : styles.bubbleTimeThem,
-                      ]}
-                     >
-                       {format(new Date(item.created_at), "HH:mm")}
-                     </Text>
-                     {item.queued ? <Text style={styles.queuedMessageText}>Pendente de sync</Text> : null}
-                   </TouchableOpacity>
+                    <View style={styles.messageMetaRow}>
+                      <Text
+                        style={[
+                          styles.bubbleTime,
+                          item.sender_id === user?.id
+                            ? styles.bubbleTimeMe
+                            : styles.bubbleTimeThem,
+                        ]}
+                      >
+                        {format(new Date(item.created_at), "HH:mm")}
+                      </Text>
+                      {getMessageStatusLabel(item) ? (
+                        <Text
+                          style={[
+                            styles.messageStatusText,
+                            item.deliveryStatus === "failed"
+                              ? styles.messageStatusFailed
+                              : item.deliveryStatus === "sending"
+                                ? styles.messageStatusSending
+                                : styles.messageStatusQueued,
+                          ]}
+                        >
+                          {getMessageStatusLabel(item)}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {item.deliveryStatus === "failed" && item.sender_id === user?.id ? (
+                      <TouchableOpacity
+                        style={styles.retryMessageButton}
+                        onPress={() => retryMessage(item)}
+                      >
+                        <Text style={styles.retryMessageButtonText}>Reenviar</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                    </TouchableOpacity>
 
                   {groupedReactions.length > 0 ? (
                     <View style={styles.reactionRow}>
@@ -872,6 +960,14 @@ export default function ChatScreen() {
               );
             }}
             contentContainerStyle={styles.messagesList}
+            ListHeaderComponent={
+              isFetchingNextPage ? (
+                <View style={styles.messagesPaginationLoader}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.messagesPaginationText}>Cargando mensajes anteriores...</Text>
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               <Text style={styles.emptyMsg}>Escriba un mensaje para comenzar</Text>
             }
@@ -1000,102 +1096,102 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   listTitle: {
-    fontSize: 18,
+    fontSize: f.lg,
     fontWeight: "600",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: s.md,
+    paddingTop: s.md,
+    paddingBottom: s.sm,
     color: colors.foreground,
   },
   searchBox: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: s.md,
+    paddingBottom: s.sm,
   },
   searchInput: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: r.lg,
+    paddingHorizontal: s.sm,
+    paddingVertical: s.sm,
     color: colors.foreground,
     backgroundColor: colors.card,
   },
-  contactList: { paddingBottom: 24 },
+  contactList: { paddingBottom: s.lg },
   contactRow: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
+    padding: s.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   avatar: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: r.full,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    marginRight: s.sm,
   },
-  avatarText: { color: "#fff", fontSize: 18, fontWeight: "600" },
+  avatarText: { color: colors.primaryForeground, fontSize: f.lg, fontWeight: "600" },
   contactInfo: { flex: 1 },
-  contactNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  contactName: { fontSize: 16, fontWeight: "600", color: colors.foreground },
+  contactNameRow: { flexDirection: "row", alignItems: "center", gap: s.sm },
+  contactName: { fontSize: f.md, fontWeight: "600", color: colors.foreground },
   statusDot: {
     width: 10,
     height: 10,
-    borderRadius: 999,
+    borderRadius: r.full,
   },
   statusDotOnline: {
-    backgroundColor: "#22c55e",
+    backgroundColor: colors.success,
   },
   statusDotOffline: {
-    backgroundColor: "#ef4444",
+    backgroundColor: colors.destructive,
   },
-  contactPreview: { fontSize: 14, color: colors.mutedForeground, marginTop: 2 },
+  contactPreview: { fontSize: f.base, color: colors.mutedForeground, marginTop: 2 },
   unreadBadge: {
     minWidth: 24,
     height: 24,
-    borderRadius: 12,
-    paddingHorizontal: 8,
+    borderRadius: r.md,
+    paddingHorizontal: s.xs,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
   },
-  unreadText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-  empty: { textAlign: "center", color: colors.mutedForeground, padding: 32 },
+  unreadText: { color: colors.primaryForeground, fontSize: f.sm, fontWeight: "700" },
+  empty: { textAlign: "center", color: colors.mutedForeground, padding: s.xl },
   chatContainer: { flex: 1, backgroundColor: colors.background },
   backBar: {
-    padding: 16,
+    padding: s.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.background,
   },
-  backText: { fontSize: 16, color: colors.primary, fontWeight: "600" },
+  backText: { fontSize: f.md, color: colors.primary, fontWeight: "600" },
   chatHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: s.md,
   },
   chatHeaderPresence: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: s.xs,
   },
   chatHeaderPresenceText: {
-    fontSize: 12,
+    fontSize: f.sm,
     fontWeight: "600",
     color: colors.mutedForeground,
   },
-  messagesList: { padding: 16, paddingBottom: 24 },
+  messagesList: { padding: s.md, paddingBottom: s.lg },
   messageBlock: {
-    marginBottom: 10,
+    marginBottom: s.xs,
   },
   bubble: {
     maxWidth: "84%",
-    padding: 12,
-    borderRadius: 16,
+    padding: s.sm,
+    borderRadius: r.lg,
   },
   bubbleMe: {
     alignSelf: "flex-end",
@@ -1107,22 +1203,56 @@ const styles = StyleSheet.create({
     backgroundColor: colors.muted,
     borderBottomLeftRadius: 4,
   },
-  bubbleText: { fontSize: 15 },
-  bubbleTextMe: { color: "#fff" },
+  bubbleText: { fontSize: f.base },
+  bubbleTextMe: { color: colors.primaryForeground },
   bubbleTextThem: { color: colors.foreground },
-  bubbleTime: { fontSize: 11, marginTop: 6 },
+  bubbleTime: { fontSize: f.xs, marginTop: s.xs },
   bubbleTimeMe: { color: "rgba(255,255,255,0.8)" },
   bubbleTimeThem: { color: colors.mutedForeground },
+  messageMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: s.sm,
+    marginTop: s.xs,
+  },
+  messageStatusText: {
+    fontSize: f.xs,
+    fontWeight: "600",
+  },
+  messageStatusSending: {
+    color: colors.info,
+  },
+  messageStatusQueued: {
+    color: colors.warning,
+  },
+  messageStatusFailed: {
+    color: colors.destructive,
+  },
+  retryMessageButton: {
+    alignSelf: "flex-end",
+    marginTop: s.sm,
+    paddingHorizontal: s.xs,
+    paddingVertical: s.xs,
+    borderRadius: r.full,
+    borderWidth: 1,
+    borderColor: colors.destructive,
+  },
+  retryMessageButtonText: {
+    color: colors.destructive,
+    fontSize: f.xs,
+    fontWeight: "700",
+  },
   attachmentCard: {
-    marginTop: 10,
-    borderRadius: 12,
+    marginTop: s.sm,
+    borderRadius: r.md,
     overflow: "hidden",
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: colors.primaryMuted,
   },
   attachmentCardQueued: {
     opacity: 0.75,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
+    borderColor: colors.border,
     borderStyle: "dashed",
   },
   attachmentImage: {
@@ -1130,52 +1260,46 @@ const styles = StyleSheet.create({
     height: 120,
   },
   attachmentInfo: {
-    padding: 10,
+    padding: s.xs,
   },
   attachmentTitle: {
-    fontSize: 14,
+    fontSize: f.base,
     fontWeight: "600",
   },
   attachmentSubtitle: {
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: f.sm,
+    marginTop: s.xs,
   },
   queuedAttachmentBadge: {
     alignSelf: "flex-start",
-    marginTop: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.16)",
-    color: "#fff",
-    fontSize: 11,
+    marginTop: s.xs,
+    paddingHorizontal: s.xs,
+    paddingVertical: s.xs,
+    borderRadius: r.full,
+    backgroundColor: colors.primaryMuted,
+    color: colors.primaryForeground,
+    fontSize: f.xs,
     fontWeight: "600",
   },
   attachmentAction: {
-    fontSize: 12,
+    fontSize: f.sm,
     fontWeight: "600",
-    marginTop: 8,
-  },
-  queuedMessageText: {
-    marginTop: 4,
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#fef3c7",
+    marginTop: s.sm,
   },
   reactionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 6,
+    gap: s.sm,
+    marginTop: s.xs,
   },
   reactionChip: {
     alignSelf: "flex-start",
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    borderRadius: r.full,
+    paddingHorizontal: s.xs,
+    paddingVertical: s.xs,
   },
   reactionChipActive: {
     borderColor: colors.primary,
@@ -1183,50 +1307,61 @@ const styles = StyleSheet.create({
   },
   reactionChipText: {
     color: colors.foreground,
-    fontSize: 12,
+    fontSize: f.sm,
     fontWeight: "600",
   },
   quickReactionRow: {
     flexDirection: "row",
     alignSelf: "flex-start",
-    gap: 8,
-    marginTop: 6,
+    gap: s.sm,
+    marginTop: s.xs,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: r.full,
+    paddingHorizontal: s.xs,
+    paddingVertical: s.xs,
   },
   quickReactionButton: {
     paddingHorizontal: 2,
   },
   quickReactionText: {
-    fontSize: 20,
+    fontSize: f.xl,
   },
   emptyMsg: {
     textAlign: "center",
     color: colors.mutedForeground,
-    paddingVertical: 32,
+    paddingVertical: s.xl,
+  },
+  messagesPaginationLoader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: s.sm,
+    paddingBottom: s.sm,
+  },
+  messagesPaginationText: {
+    color: colors.mutedForeground,
+    fontSize: f.sm,
   },
   draftAttachmentRow: {
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-    gap: 10,
+    paddingHorizontal: s.sm,
+    paddingBottom: s.xs,
+    gap: s.sm,
   },
   draftAttachmentCard: {
     width: 210,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 14,
-    padding: 10,
+    borderRadius: r.lg,
+    padding: s.xs,
     backgroundColor: colors.card,
   },
   draftImage: {
     width: "100%",
     height: 90,
-    borderRadius: 10,
-    marginBottom: 8,
+    borderRadius: r.sm,
+    marginBottom: s.sm,
   },
   draftAttachmentInfo: {
     gap: 2,
@@ -1234,51 +1369,51 @@ const styles = StyleSheet.create({
   draftAttachmentTitle: {
     color: colors.foreground,
     fontWeight: "600",
-    fontSize: 13,
+    fontSize: f.sm,
   },
   draftAttachmentSubtitle: {
     color: colors.mutedForeground,
-    fontSize: 12,
+    fontSize: f.sm,
   },
   draftQueuedHint: {
-    marginTop: 4,
+    marginTop: s.xs,
     color: colors.primary,
-    fontSize: 11,
+    fontSize: f.xs,
     fontWeight: "600",
   },
   removeAttachment: {
-    marginTop: 8,
+    marginTop: s.sm,
     color: colors.destructive,
-    fontSize: 12,
+    fontSize: f.sm,
     fontWeight: "600",
   },
   composerActionsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingBottom: 8,
+    gap: s.sm,
+    paddingHorizontal: s.sm,
+    paddingBottom: s.xs,
   },
   toolBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 999,
+    paddingHorizontal: s.sm,
+    paddingVertical: s.xs,
+    borderRadius: r.full,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
   },
   toolBtnText: {
-    fontSize: 18,
+    fontSize: f.lg,
   },
   toolBtnLabel: {
     color: colors.foreground,
-    fontSize: 12,
+    fontSize: f.sm,
     fontWeight: "600",
   },
   inputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    padding: 12,
+    padding: s.sm,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.background,
@@ -1289,57 +1424,57 @@ const styles = StyleSheet.create({
     maxHeight: 110,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginRight: 8,
-    fontSize: 16,
+    borderRadius: r.lg,
+    paddingHorizontal: s.md,
+    paddingVertical: s.xs,
+    marginRight: s.sm,
+    fontSize: f.md,
     color: colors.foreground,
     backgroundColor: colors.card,
   },
   sendBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: s.md,
+    paddingVertical: s.sm,
     backgroundColor: colors.primary,
-    borderRadius: 22,
+    borderRadius: r.lg,
   },
   sendBtnDisabled: { opacity: 0.5 },
-  sendBtnText: { color: "#fff", fontWeight: "600" },
+  sendBtnText: { color: colors.primaryForeground, fontWeight: "600" },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15,23,42,0.7)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: s.lg,
   },
   emojiModal: {
     width: "100%",
     maxWidth: 320,
     backgroundColor: colors.card,
-    borderRadius: 20,
-    padding: 20,
+    borderRadius: r.xl,
+    padding: s.md,
   },
   modalTitle: {
     color: colors.foreground,
-    fontSize: 18,
+    fontSize: f.lg,
     fontWeight: "700",
-    marginBottom: 16,
+    marginBottom: s.md,
   },
   emojiGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: s.md,
   },
   emojiButton: {
     width: 56,
     height: 56,
-    borderRadius: 16,
+    borderRadius: r.lg,
     backgroundColor: colors.muted,
     alignItems: "center",
     justifyContent: "center",
   },
   emojiText: {
-    fontSize: 28,
+    fontSize: f.xl,
   },
   imagePreview: {
     width: "100%",
@@ -1351,13 +1486,13 @@ const styles = StyleSheet.create({
     top: 48,
     right: 24,
     zIndex: 2,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
+    paddingHorizontal: s.sm,
+    paddingVertical: s.xs,
+    borderRadius: r.full,
     backgroundColor: "rgba(0,0,0,0.55)",
   },
   imagePreviewCloseText: {
-    color: "#fff",
+    color: colors.primaryForeground,
     fontWeight: "600",
   },
 });
