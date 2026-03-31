@@ -2,6 +2,25 @@ import { getAccessToken } from "./backend-auth";
 import { resolveApiTimeoutMs } from "./config";
 import { getBackendApiUrl } from "./tenant-config";
 
+export type CollectionResponse<T> = {
+  items?: T[];
+  total?: number;
+};
+
+export function asArray<T>(payload: T[] | null | undefined): T[] {
+  return Array.isArray(payload) ? payload : [];
+}
+
+export function asItemsArray<T>(
+  payload: T[] | CollectionResponse<T> | null | undefined,
+): T[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  return Array.isArray(payload?.items) ? payload.items : [];
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const accessToken = await getAccessToken();
   if (!accessToken) {

@@ -45,6 +45,13 @@ const isValidPhone = (phone: string): boolean => {
   return phoneRegex.test(phone);
 };
 
+const normalizeName = (value: string) => value.replace(/\s+/g, " ").trim();
+const normalizeDocument = (value: string) => value.replace(/\s+/g, " ").trim().toUpperCase();
+const normalizePhone = (value: string) =>
+  value.replace(/[^\d\s+\-()]/g, "").replace(/\s+/g, " ").trim();
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
+const normalizeAddress = (value: string) => value.replace(/\s+/g, " ").trim();
+
 const emptyForm = {
   name: "",
   document: "",
@@ -140,6 +147,7 @@ export default function ClientsScreen() {
   const [addressSearching, setAddressSearching] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [pickerViewport, setPickerViewport] = useState<PickerViewport>(DEFAULT_VIEWPORT);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const mapboxMapStyle = useMemo(() => getMapboxMapStyle(), []);
   const mapWarnings = useMemo(() => {
@@ -168,6 +176,7 @@ export default function ClientsScreen() {
     setEditingClient(null);
     setForm(emptyForm);
     setPickerViewport(DEFAULT_VIEWPORT);
+    setTouched({});
     setModalVisible(true);
   };
 
@@ -175,6 +184,7 @@ export default function ClientsScreen() {
     setEditingClient(client);
     setForm(buildClientForm(client));
     setPickerViewport(buildViewportFromClient(client));
+    setTouched({});
     setModalVisible(true);
   };
 
@@ -183,7 +193,51 @@ export default function ClientsScreen() {
     setEditingClient(null);
     setForm(emptyForm);
     setPickerViewport(DEFAULT_VIEWPORT);
+    setTouched({});
   };
+
+  const markTouched = (field: string) => {
+    setTouched((current) => ({ ...current, [field]: true }));
+  };
+
+  const fieldErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const normalizedName = normalizeName(form.name);
+    const normalizedAddress = normalizeAddress(form.address);
+    const normalizedEmail = normalizeEmail(form.email);
+    const normalizedPhone = normalizePhone(form.phone);
+    const latitude = form.latitude.trim() ? Number.parseFloat(form.latitude.trim()) : null;
+    const longitude = form.longitude.trim() ? Number.parseFloat(form.longitude.trim()) : null;
+
+    if (!normalizedName) {
+      errors.name = "El nombre es obligatorio.";
+    }
+
+    if (normalizedEmail && !isValidEmail(normalizedEmail)) {
+      errors.email = "Ingrese un email valido.";
+    }
+
+    if (normalizedPhone && !isValidPhone(normalizedPhone)) {
+      errors.phone = "Ingrese un telefono valido.";
+    }
+
+    if (normalizedAddress && normalizedAddress.length < 3) {
+      errors.address = "Ingrese una direccion mas completa.";
+    }
+
+    if ((latitude === null) !== (longitude === null)) {
+      errors.location = "Latitud y longitud deben completarse juntas.";
+    } else if (
+      latitude !== null &&
+      (Number.isNaN(latitude) || longitude === null || Number.isNaN(longitude))
+    ) {
+      errors.location = "Las coordenadas no son validas.";
+    }
+
+    return errors;
+  }, [form.address, form.email, form.latitude, form.longitude, form.name, form.phone]);
+
+  const hasLocation = !!(form.latitude && form.longitude);
 
   const updateLocation = (
     latitude: number,
@@ -309,7 +363,10 @@ export default function ClientsScreen() {
   };
 
   const handleAddressSearch = async () => {
-    if (!form.address.trim() || form.address.trim().length < 3) {
+    const normalizedAddress = normalizeAddress(form.address);
+
+    if (!normalizedAddress || normalizedAddress.length < 3) {
+      markTouched("address");
       Alert.alert(
         "Direccion requerida",
         "Ingrese una direccion mas completa para buscar coordenadas."
@@ -320,7 +377,7 @@ export default function ClientsScreen() {
     setAddressSearching(true);
 
     try {
-      const result = await geocodeAddress(form.address.trim());
+      const result = await geocodeAddress(normalizedAddress);
       updateLocation(result.latitude, result.longitude, result.displayName);
     } catch (error) {
       if (error instanceof Error && error.message === "Address not found") {
@@ -343,17 +400,27 @@ export default function ClientsScreen() {
   };
 
   const handleSaveClient = async () => {
-    if (!user || !form.name.trim()) {
+    const normalizedName = normalizeName(form.name);
+    const normalizedDocument = normalizeDocument(form.document);
+    const normalizedPhone = normalizePhone(form.phone);
+    const normalizedEmail = normalizeEmail(form.email);
+    const normalizedAddress = normalizeAddress(form.address);
+    const normalizedNotes = form.notes.trim();
+
+    if (!user || !normalizedName) {
+      markTouched("name");
       Alert.alert("Error", "El nombre es obligatorio");
       return;
     }
 
-    if (!isValidEmail(form.email)) {
+    if (!isValidEmail(normalizedEmail)) {
+      markTouched("email");
       Alert.alert("Error", "Formato de email invalido");
       return;
     }
 
-    if (!isValidPhone(form.phone)) {
+    if (!isValidPhone(normalizedPhone)) {
+      markTouched("phone");
       Alert.alert("Error", "Formato de telefono invalido");
       return;
     }
@@ -366,6 +433,7 @@ export default function ClientsScreen() {
       : null;
 
     if ((latitude === null) !== (longitude === null)) {
+      markTouched("location");
       Alert.alert(
         "Ubicacion incompleta",
         "Latitude y longitude deben estar completas o vacias."
@@ -377,6 +445,7 @@ export default function ClientsScreen() {
       latitude !== null &&
       (Number.isNaN(latitude) || longitude === null || Number.isNaN(longitude))
     ) {
+      markTouched("location");
       Alert.alert("Error", "Las coordenadas del cliente no son validas.");
       return;
     }
@@ -386,24 +455,24 @@ export default function ClientsScreen() {
         await updateClientMutation.mutateAsync({
           userId: user.id,
           client: editingClient,
-          name: form.name,
-          document: form.document,
-          phone: form.phone,
-          email: form.email,
-          address: form.address,
-          notes: form.notes,
+          name: normalizedName,
+          document: normalizedDocument,
+          phone: normalizedPhone,
+          email: normalizedEmail,
+          address: normalizedAddress,
+          notes: normalizedNotes,
           latitude,
           longitude,
         });
       } else {
         await createClientMutation.mutateAsync({
           userId: user.id,
-          name: form.name,
-          document: form.document,
-          phone: form.phone,
-          email: form.email,
-          address: form.address,
-          notes: form.notes,
+          name: normalizedName,
+          document: normalizedDocument,
+          phone: normalizedPhone,
+          email: normalizedEmail,
+          address: normalizedAddress,
+          notes: normalizedNotes,
           latitude,
           longitude,
         });
@@ -499,6 +568,11 @@ export default function ClientsScreen() {
           placeholder="Nombre del cliente"
           value={form.name}
           onChangeText={(text) => setForm((current) => ({ ...current, name: text }))}
+          onBlur={() => {
+            markTouched("name");
+            setForm((current) => ({ ...current, name: normalizeName(current.name) }));
+          }}
+          error={touched.name ? fieldErrors.name : null}
         />
         <FormField
           label="RUC / DOC"
@@ -507,6 +581,9 @@ export default function ClientsScreen() {
           onChangeText={(text) =>
             setForm((current) => ({ ...current, document: text }))
           }
+          onBlur={() =>
+            setForm((current) => ({ ...current, document: normalizeDocument(current.document) }))
+          }
         />
         <FormField
           label="Telefono"
@@ -514,6 +591,12 @@ export default function ClientsScreen() {
           value={form.phone}
           onChangeText={(text) => setForm((current) => ({ ...current, phone: text }))}
           keyboardType="phone-pad"
+          onBlur={() => {
+            markTouched("phone");
+            setForm((current) => ({ ...current, phone: normalizePhone(current.phone) }));
+          }}
+          error={touched.phone ? fieldErrors.phone : null}
+          helpText={!touched.phone ? "Puede dejarlo vacio si no lo tiene." : null}
         />
         <FormField
           label="Email"
@@ -521,6 +604,12 @@ export default function ClientsScreen() {
           value={form.email}
           onChangeText={(text) => setForm((current) => ({ ...current, email: text }))}
           keyboardType="email-address"
+          autoCapitalize="none"
+          onBlur={() => {
+            markTouched("email");
+            setForm((current) => ({ ...current, email: normalizeEmail(current.email) }));
+          }}
+          error={touched.email ? fieldErrors.email : null}
         />
         <FormField
           label="Direccion"
@@ -529,6 +618,12 @@ export default function ClientsScreen() {
           onChangeText={(text) =>
             setForm((current) => ({ ...current, address: text }))
           }
+          onBlur={() => {
+            markTouched("address");
+            setForm((current) => ({ ...current, address: normalizeAddress(current.address) }));
+          }}
+          error={touched.address ? fieldErrors.address : null}
+          helpText={!hasLocation ? "Use GPS, el mapa o la busqueda por direccion para fijar la ubicacion." : null}
         />
 
         <View style={styles.locationActions}>
@@ -604,6 +699,15 @@ export default function ClientsScreen() {
             <Text style={styles.coordinatesValue}>
               Punto seleccionado: {form.latitude}, {form.longitude}
             </Text>
+            <TouchableOpacity
+              style={styles.clearLocationButton}
+              onPress={() => {
+                setForm((current) => ({ ...current, latitude: "", longitude: "" }));
+                markTouched("location");
+              }}
+            >
+              <Text style={styles.clearLocationButtonText}>Limpiar ubicacion</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.mapWrapper}>
@@ -641,6 +745,11 @@ export default function ClientsScreen() {
             </Text>
           </View>
         )}
+        {touched.location && fieldErrors.location ? (
+          <Text style={styles.locationErrorText}>{fieldErrors.location}</Text>
+        ) : hasLocation ? (
+          <Text style={styles.locationHintText}>Ubicacion lista para guardar.</Text>
+        ) : null}
         <FormField
           label="Notas"
           placeholder="Observaciones del cliente"
@@ -746,6 +855,21 @@ const styles = StyleSheet.create({
     color: colors.primaryForeground,
     fontWeight: "600",
   },
+  clearLocationButton: {
+    alignSelf: "flex-start",
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  clearLocationButtonText: {
+    color: colors.foreground,
+    fontSize: 13,
+    fontWeight: "600",
+  },
   warningBox: {
     borderWidth: 1,
     borderColor: colors.warning,
@@ -795,5 +919,15 @@ const styles = StyleSheet.create({
     color: colors.foreground,
     fontWeight: "600",
     fontSize: 13,
+  },
+  locationHintText: {
+    color: colors.success,
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  locationErrorText: {
+    color: colors.destructive,
+    fontSize: 12,
+    marginBottom: 12,
   },
 });

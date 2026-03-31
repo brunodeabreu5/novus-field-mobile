@@ -1,6 +1,6 @@
 import { endOfDay, startOfDay, startOfWeek } from "date-fns";
 import { es } from "date-fns/locale";
-import { backendApi } from "../backend-api";
+import { asItemsArray, backendApi, type CollectionResponse } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
@@ -36,7 +36,10 @@ export async function fetchVisits(userId: string, period: VisitPeriod): Promise<
     to: endOfDay(to).toISOString(),
     limit: "200",
   });
-  return backendApi.get<VisitRecord[]>(`/visits?${params.toString()}`);
+  const response = await backendApi.get<CollectionResponse<VisitRecord>>(
+    `/visits?${params.toString()}`,
+  );
+  return asItemsArray(response);
 }
 
 export async function createVisit(input: {
@@ -87,6 +90,55 @@ export async function createVisit(input: {
       });
       return { visit, queued: true as const };
     }
+    throw error;
+  }
+}
+
+export async function checkoutVisit(input: {
+  userId: string;
+  visitId: string;
+  timestamp: string;
+  latitude?: number | null;
+  longitude?: number | null;
+}) {
+  try {
+    const updated = await backendApi.patch<VisitRecord>(
+      `/visits/${encodeURIComponent(input.visitId)}/checkout`,
+      {
+        check_out_at: input.timestamp,
+        check_out_lat: input.latitude ?? null,
+        check_out_lng: input.longitude ?? null,
+      },
+    );
+
+    return { visit: updated, queued: false as const };
+  } catch (error) {
+    if (isOfflineLikeError(error)) {
+      await offlineStorage.enqueue({
+        type: "check_out",
+        payload: {
+          visitId: input.visitId,
+          zoneId: input.visitId,
+          position: {
+            lat: input.latitude ?? 0,
+            lng: input.longitude ?? 0,
+            accuracy: 0,
+          },
+          timestamp: input.timestamp,
+        },
+      });
+
+      return {
+        visit: {
+          id: input.visitId,
+          check_out_at: input.timestamp,
+          check_out_lat: input.latitude ?? null,
+          check_out_lng: input.longitude ?? null,
+        } as VisitRecord,
+        queued: true as const,
+      };
+    }
+
     throw error;
   }
 }

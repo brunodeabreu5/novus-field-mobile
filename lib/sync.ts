@@ -1,4 +1,4 @@
-import { backendApi } from "./backend-api";
+import { asItemsArray, backendApi, type CollectionResponse } from "./backend-api";
 import { logger } from "./logger";
 import {
   type ChargeCreateAction,
@@ -19,6 +19,7 @@ import {
 
 interface SyncQueuedActionsOptions {
   allowedTypes?: QueuedAction["type"][];
+  allowedIds?: string[];
 }
 
 let syncInFlight: Promise<number> | null = null;
@@ -68,9 +69,17 @@ export async function syncQueuedActions(
 
 async function runQueuedSync(options?: SyncQueuedActionsOptions): Promise<number> {
   const queue = await offlineStorage.getQueue();
-  const filteredQueue = options?.allowedTypes?.length
-    ? queue.filter((action) => options.allowedTypes?.includes(action.type))
-    : queue;
+  const filteredQueue = queue.filter((action) => {
+    if (options?.allowedTypes?.length && !options.allowedTypes.includes(action.type)) {
+      return false;
+    }
+
+    if (options?.allowedIds?.length && !options.allowedIds.includes(action.id)) {
+      return false;
+    }
+
+    return true;
+  });
 
   if (filteredQueue.length === 0) return 0;
 
@@ -228,10 +237,10 @@ async function fetchCharge(chargeId: string) {
 
 async function fetchChatMessage(messageId: string, otherUserId: string) {
   try {
-    const messages = await backendApi.get<Array<{ id: string }>>(
+    const messages = await backendApi.get<CollectionResponse<{ id: string }> | { items: { id: string }[] }>(
       `/chat/messages?otherUserId=${encodeURIComponent(otherUserId)}`,
     );
-    const known = messages.find((message) => message.id === messageId);
+    const known = asItemsArray(messages).find((message) => message.id === messageId);
     return known ?? null;
   } catch {
     return null;

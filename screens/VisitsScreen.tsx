@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import { useQueryClient } from "@tanstack/react-query";
@@ -21,6 +22,7 @@ import { es } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
 import {
   useClientsData,
+  useCheckoutVisit,
   useCreateVisit,
   useVisitTypeOptionsData,
   useVisitsData,
@@ -51,6 +53,29 @@ const getDefaultVisitType = (types: VisitTypeOption[]) =>
   types.find((item) => item.is_default)?.name || types[0]?.name || "Comercial";
 
 const EMPTY_VISITS: VisitRecord[] = [];
+
+const normalizeClientName = (value: string) => value.replace(/\s+/g, " ").trim();
+const normalizeVisitType = (value: string) => value.replace(/\s+/g, " ").trim();
+const normalizeNotes = (value: string) => value.replace(/\s+/g, " ").trim();
+
+async function resolveCurrentLocation() {
+  try {
+    const lastKnown = await Location.getLastKnownPositionAsync({});
+    if (lastKnown) {
+      return lastKnown;
+    }
+  } catch {
+    // Ignore and fall back to a live fix.
+  }
+
+  try {
+    return await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    });
+  } catch {
+    return null;
+  }
+}
 
 function areAttachmentListsEqual(a: VisitAttachment[], b: VisitAttachment[]) {
   if (a.length !== b.length) return false;
@@ -225,8 +250,11 @@ export default function VisitsScreen() {
   const [attachmentsByVisit, setAttachmentsByVisit] = useState<Record<string, VisitAttachment[]>>({});
   const [loadingAttachmentsByVisit, setLoadingAttachmentsByVisit] = useState<Record<string, boolean>>({});
   const [uploadingVisitId, setUploadingVisitId] = useState<string | null>(null);
+  const [checkingOutVisitId, setCheckingOutVisitId] = useState<string | null>(null);
   const [pendingAttachmentCountByVisit, setPendingAttachmentCountByVisit] =
     useState<Record<string, number>>({});
+  const [pendingSyncVisitIds, setPendingSyncVisitIds] = useState<Record<string, boolean>>({});
+  const [pendingCheckoutVisitIds, setPendingCheckoutVisitIds] = useState<Record<string, boolean>>({});
   const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(null);
   const [form, setForm] = useState({
     clientId: "",
@@ -235,6 +263,7 @@ export default function VisitsScreen() {
     visitType: "Comercial",
   });
   const [draftAttachments, setDraftAttachments] = useState<DraftVisitAttachment[]>([]);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const visitsQuery = useVisitsData(user?.id, period);
   const visits = visitsQuery.data ?? EMPTY_VISITS;
@@ -243,6 +272,7 @@ export default function VisitsScreen() {
     useVisitTypeOptionsData();
   const { data: clients = [] } = useClientsData();
   const createVisitMutation = useCreateVisit();
+  const checkoutVisitMutation = useCheckoutVisit();
 
   const visitsWithAttachments = useMemo(
     () =>
@@ -280,6 +310,7 @@ export default function VisitsScreen() {
     setDraftAttachments([]);
     setSelectedVisitForAttachment(null);
     setActivePicker(null);
+    setTouched({});
     setModalVisible(true);
   };
 
@@ -290,7 +321,30 @@ export default function VisitsScreen() {
     }
 
     setModalVisible(false);
+    setTouched({});
   };
+
+  const markTouched = (field: string) => {
+    setTouched((current) => ({ ...current, [field]: true }));
+  };
+
+  const fieldErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const resolvedClientName = normalizeClientName(form.clientName);
+    const resolvedVisitType = normalizeVisitType(form.visitType);
+
+    if (!resolvedClientName) {
+      errors.clientName = useManualClientEntry
+        ? "Ingrese el nombre del cliente."
+        : "Seleccione un cliente.";
+    }
+
+    if (!resolvedVisitType) {
+      errors.visitType = "Seleccione un tipo de visita.";
+    }
+
+    return errors;
+  }, [form.clientName, form.visitType, useManualClientEntry]);
 
   const getModalTitle = () => {
     if (activePicker === "client") {
@@ -318,6 +372,7 @@ export default function VisitsScreen() {
               clientId: client.id,
               clientName: client.name,
             }));
+            markTouched("clientName");
             setActivePicker(null);
           }}
           onBack={() => setActivePicker(null)}
@@ -334,6 +389,7 @@ export default function VisitsScreen() {
           selectedVisitType={form.visitType}
           onSelectVisitType={(visitType) => {
             setForm((current) => ({ ...current, visitType }));
+            markTouched("visitType");
             setActivePicker(null);
           }}
           onBack={() => setActivePicker(null)}
@@ -368,6 +424,7 @@ export default function VisitsScreen() {
             ]}
             onPress={() => {
               setUseManualClientEntry(true);
+              markTouched("clientName");
               setForm((current) => ({ ...current, clientId: "" }));
             }}
           >
@@ -390,13 +447,25 @@ export default function VisitsScreen() {
             onChangeText={(text) =>
               setForm((current) => ({ ...current, clientName: text, clientId: "" }))
             }
+            onBlur={() => {
+              markTouched("clientName");
+              setForm((current) => ({
+                ...current,
+                clientName: normalizeClientName(current.clientName),
+              }));
+            }}
+            error={touched.clientName ? fieldErrors.clientName : null}
+            helpText={!touched.clientName ? "Use esta opcion si el cliente aun no esta registrado." : null}
           />
         ) : (
           <>
             <Text style={styles.label}>Cliente</Text>
             <TouchableOpacity
-              style={styles.selector}
-              onPress={() => setActivePicker("client")}
+              style={[styles.selector, touched.clientName && fieldErrors.clientName ? styles.selectorError : null]}
+              onPress={() => {
+                markTouched("clientName");
+                setActivePicker("client");
+              }}
             >
               <Text
                 style={[
@@ -407,13 +476,21 @@ export default function VisitsScreen() {
                 {form.clientName || "Seleccione un cliente"}
               </Text>
             </TouchableOpacity>
+            {touched.clientName && fieldErrors.clientName ? (
+              <Text style={styles.errorText}>{fieldErrors.clientName}</Text>
+            ) : (
+              <Text style={styles.helpText}>Seleccione un cliente registrado o cambie a cliente no cadastrado.</Text>
+            )}
           </>
         )}
 
         <Text style={styles.label}>Tipo</Text>
         <TouchableOpacity
-          style={styles.selector}
-          onPress={() => setActivePicker("type")}
+          style={[styles.selector, touched.visitType && fieldErrors.visitType ? styles.selectorError : null]}
+          onPress={() => {
+            markTouched("visitType");
+            setActivePicker("type");
+          }}
           disabled={isLoadingVisitTypes}
         >
           <Text
@@ -427,6 +504,11 @@ export default function VisitsScreen() {
               : form.visitType || "Seleccione un tipo"}
           </Text>
         </TouchableOpacity>
+        {touched.visitType && fieldErrors.visitType ? (
+          <Text style={styles.errorText}>{fieldErrors.visitType}</Text>
+        ) : (
+          <Text style={styles.helpText}>Defina el tipo para clasificar mejor la visita.</Text>
+        )}
 
         <FormField
           label="Notas (opcional)"
@@ -435,7 +517,11 @@ export default function VisitsScreen() {
           onChangeText={(text) =>
             setForm((current) => ({ ...current, notes: text }))
           }
+          onBlur={() =>
+            setForm((current) => ({ ...current, notes: normalizeNotes(current.notes) }))
+          }
           multiline
+          helpText="Puede dejar contexto breve para seguimiento comercial." 
         />
 
         <View style={styles.attachmentButtonsRow}>
@@ -476,7 +562,7 @@ export default function VisitsScreen() {
         <FormActions
           isLoading={createVisitMutation.isPending}
           submitLabel="Crear Visita"
-          onCancel={() => setModalVisible(false)}
+          onCancel={handleModalRequestClose}
           onSubmit={handleCreateVisit}
         />
       </>
@@ -530,9 +616,25 @@ export default function VisitsScreen() {
         acc[item.payload.visitId] = (acc[item.payload.visitId] || 0) + 1;
         return acc;
       }, {});
+      const queuedVisits = queue.reduce<Record<string, boolean>>((acc, item) => {
+        if (item.type === "manual_visit_create") {
+          acc[item.payload.visitId] = true;
+        }
+
+        return acc;
+      }, {});
+      const queuedCheckouts = queue.reduce<Record<string, boolean>>((acc, item) => {
+        if (item.type === "check_out") {
+          acc[item.payload.visitId] = true;
+        }
+
+        return acc;
+      }, {});
 
       if (!cancelled) {
         setPendingAttachmentCountByVisit(counts);
+        setPendingSyncVisitIds(queuedVisits);
+        setPendingCheckoutVisitIds(queuedCheckouts);
       }
     };
 
@@ -703,13 +805,16 @@ export default function VisitsScreen() {
       return;
     }
 
-    const resolvedClientName = form.clientName.trim();
+    const resolvedClientName = normalizeClientName(form.clientName);
     if (!resolvedClientName) {
+      markTouched("clientName");
       Alert.alert("Error", "Seleccione o ingrese un cliente.");
       return;
     }
 
-    if (!form.visitType.trim()) {
+    const resolvedVisitType = normalizeVisitType(form.visitType);
+    if (!resolvedVisitType) {
+      markTouched("visitType");
       Alert.alert("Error", "Seleccione un tipo de visita");
       return;
     }
@@ -720,8 +825,8 @@ export default function VisitsScreen() {
         vendorName: profile.full_name || user.email || "Vendedor",
         clientId: form.clientId || null,
         clientName: resolvedClientName,
-        notes: form.notes,
-        visitType: form.visitType,
+        notes: normalizeNotes(form.notes),
+        visitType: resolvedVisitType,
       });
 
       if (result.queued) {
@@ -741,6 +846,7 @@ export default function VisitsScreen() {
         }
         setModalVisible(false);
         setDraftAttachments([]);
+        setTouched({});
         return;
       }
 
@@ -756,6 +862,7 @@ export default function VisitsScreen() {
 
       setModalVisible(false);
       setDraftAttachments([]);
+      setTouched({});
       await refreshVisitData();
     } catch (error) {
       Alert.alert(
@@ -791,6 +898,42 @@ export default function VisitsScreen() {
         "Error",
         error instanceof Error ? error.message : "No se pudo eliminar el anexo.",
       );
+    }
+  };
+
+  const handleCheckoutVisit = async (visit: VisitRecord) => {
+    if (!user) {
+      return;
+    }
+
+    setCheckingOutVisitId(visit.id);
+
+    try {
+      const position = await resolveCurrentLocation();
+      const timestamp = new Date().toISOString();
+      const result = await checkoutVisitMutation.mutateAsync({
+        userId: user.id,
+        visitId: visit.id,
+        timestamp,
+        latitude: position?.coords.latitude ?? visit.check_in_lat ?? null,
+        longitude: position?.coords.longitude ?? visit.check_in_lng ?? null,
+      });
+
+      if (result.queued) {
+        Alert.alert(
+          "Visita en cola",
+          "La visita se marco como finalizada y se sincronizara automaticamente.",
+        );
+      }
+
+      await refreshVisitData();
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : "No se pudo finalizar la visita",
+      );
+    } finally {
+      setCheckingOutVisitId(null);
     }
   };
 
@@ -856,7 +999,7 @@ export default function VisitsScreen() {
     );
 
     return (
-      <View style={styles.visitCard}>
+      <View style={[styles.visitCard, !item.check_out_at ? styles.visitCardActive : null]}>
         <View style={styles.visitHeader}>
           <Text style={styles.visitClient}>{item.client_name}</Text>
           {item.check_out_at ? (
@@ -872,6 +1015,16 @@ export default function VisitsScreen() {
         <Text style={styles.visitMeta}>
           {item.visit_type} • {format(new Date(item.check_in_at), "dd MMM HH:mm", { locale: es })}
         </Text>
+        {pendingSyncVisitIds[item.id] || item.queued ? (
+          <View style={styles.syncBadge}>
+            <Text style={styles.syncBadgeText}>Visita pendiente de sync</Text>
+          </View>
+        ) : null}
+        {pendingCheckoutVisitIds[item.id] || item.pending_checkout ? (
+          <View style={styles.syncBadgeInfo}>
+            <Text style={styles.syncBadgeInfoText}>Checkout pendiente de sync</Text>
+          </View>
+        ) : null}
         {item.notes ? <Text style={styles.visitNotes}>{item.notes}</Text> : null}
         <View style={styles.visitCounts}>
           <Text style={styles.countText}>Fotos: {item.photos_count || 0}</Text>
@@ -885,6 +1038,29 @@ export default function VisitsScreen() {
           </View>
         ) : null}
         <View style={styles.actionsRow}>
+          {!item.check_out_at ? (
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={() => {
+                Alert.alert(
+                  "Finalizar visita",
+                  `Desea finalizar la visita a ${item.client_name}?`,
+                  [
+                    { text: "Cancelar", style: "cancel" },
+                    {
+                      text: "Finalizar",
+                      onPress: () => void handleCheckoutVisit(item),
+                    },
+                  ],
+                );
+              }}
+              disabled={checkingOutVisitId === item.id}
+            >
+              <Text style={styles.primaryButtonText}>
+                {checkingOutVisitId === item.id ? "Finalizando..." : "Encerrar visita"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.secondaryButton}
             onPress={() => {
@@ -1038,6 +1214,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  visitCardActive: {
+    borderColor: colors.info,
+    shadowColor: colors.info,
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
+  },
   visitHeader: { flexDirection: "row", justifyContent: "space-between", gap: s.sm },
   visitClient: { fontSize: f.md, fontWeight: "600", color: colors.foreground, flex: 1 },
   badge: { paddingHorizontal: s.sm, paddingVertical: s.xs, borderRadius: r.full },
@@ -1063,7 +1246,44 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.warning,
   },
+  syncBadge: {
+    alignSelf: "flex-start",
+    marginTop: s.sm,
+    paddingHorizontal: s.sm,
+    paddingVertical: s.xs,
+    borderRadius: r.full,
+    backgroundColor: colors.warningMuted,
+  },
+  syncBadgeText: {
+    fontSize: f.sm,
+    fontWeight: "700",
+    color: colors.warning,
+  },
+  syncBadgeInfo: {
+    alignSelf: "flex-start",
+    marginTop: s.xs,
+    paddingHorizontal: s.sm,
+    paddingVertical: s.xs,
+    borderRadius: r.full,
+    backgroundColor: colors.infoMuted,
+  },
+  syncBadgeInfoText: {
+    fontSize: f.sm,
+    fontWeight: "700",
+    color: colors.info,
+  },
   actionsRow: { flexDirection: "row", gap: s.sm, marginTop: s.sm },
+  primaryButton: {
+    paddingHorizontal: s.sm,
+    paddingVertical: s.xs,
+    borderRadius: r.sm,
+    backgroundColor: colors.primary,
+  },
+  primaryButtonText: {
+    fontSize: f.sm,
+    color: colors.primaryForeground,
+    fontWeight: "600",
+  },
   secondaryButton: {
     paddingHorizontal: s.sm,
     paddingVertical: s.xs,
@@ -1105,8 +1325,23 @@ const styles = StyleSheet.create({
     marginBottom: s.md,
     backgroundColor: colors.card,
   },
+  selectorError: {
+    borderColor: colors.destructive,
+  },
   selectorText: { fontSize: f.base, color: colors.foreground },
   selectorPlaceholder: { color: colors.mutedForeground },
+  helpText: {
+    marginTop: -s.sm,
+    marginBottom: s.md,
+    fontSize: f.xs,
+    color: colors.mutedForeground,
+  },
+  errorText: {
+    marginTop: -s.sm,
+    marginBottom: s.md,
+    fontSize: f.xs,
+    color: colors.destructive,
+  },
   typeOption: {
     paddingHorizontal: s.sm,
     paddingVertical: s.sm,

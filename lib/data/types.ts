@@ -15,6 +15,16 @@ export type VisitRecord = Visit & {
   photos_count?: number | null;
   attachments_count?: number | null;
   has_attachments?: boolean;
+  queued?: boolean;
+  pending_checkout?: boolean;
+};
+
+export type ClientRecord = Client & {
+  queued?: boolean;
+};
+
+export type ChargeRecord = Charge & {
+  queued?: boolean;
 };
 
 export interface VisitAttachment {

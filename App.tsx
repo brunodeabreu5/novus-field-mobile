@@ -8,6 +8,7 @@ import { DevicePermissionsProvider } from "./contexts/DevicePermissionsContext";
 import { MenuProvider } from "./contexts/MenuContext";
 import { TenantProvider, useTenant } from "./contexts/TenantContext";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
+import GlobalSyncIndicator from "./components/GlobalSyncIndicator";
 import { ChatPresenceProvider } from "./providers/ChatPresenceProvider";
 import { TrackingProvider } from "./providers/TrackingProvider";
 import RootNavigator from "./navigation/RootNavigator";
@@ -20,6 +21,7 @@ function ThemedApp() {
   return (
     <>
       <RootNavigator />
+      <GlobalSyncIndicator />
       <StatusBar style={theme === "dark" ? "light" : "dark"} />
     </>
   );

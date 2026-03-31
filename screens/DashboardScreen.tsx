@@ -115,7 +115,7 @@ export default function DashboardScreen() {
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Visitas en curso</Text>
-          <Text style={styles.summaryValue}>
+          <Text style={[styles.summaryValue, styles.summaryValueInfo]}>
             {stats.visitsToday - stats.completedVisits}
           </Text>
         </View>
@@ -144,8 +144,10 @@ export default function DashboardScreen() {
 }
 
 function RecentVisitRow({ visit }: { visit: Visit }) {
+  const isInProgress = !visit.check_out_at;
+
   return (
-    <View style={styles.visitRow}>
+    <View style={[styles.visitRow, isInProgress ? styles.visitRowActive : null]}>
       <View style={styles.visitIcon}>
         <Text>Visita</Text>
       </View>
@@ -171,7 +173,7 @@ function RecentVisitRow({ visit }: { visit: Visit }) {
             visit.check_out_at ? styles.badgeTextSuccess : styles.badgeTextInfo,
           ]}
         >
-          {visit.check_out_at ? "OK" : "..."}
+          {visit.check_out_at ? "OK" : "EN CURSO"}
         </Text>
       </View>
     </View>
@@ -305,6 +307,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.foreground,
   },
+  summaryValueInfo: {
+    color: colors.info,
+  },
   visitRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -312,6 +317,12 @@ const styles = StyleSheet.create({
     paddingVertical: s.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  visitRowActive: {
+    borderColor: colors.info,
+    backgroundColor: colors.infoMuted,
+    borderRadius: r.md,
+    paddingHorizontal: s.sm,
   },
   visitIcon: {
     width: 44,

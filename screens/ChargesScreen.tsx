@@ -22,8 +22,10 @@ import {
   useChargesData,
   useCreateCharge,
   useClientsData,
+  useUpdateCharge,
+  useUpdateChargeStatus,
 } from "../hooks/use-mobile-data";
-import type { Charge, Client } from "../lib/mobile-data";
+import type { ChargeRecord, Client } from "../lib/mobile-data";
 import type { ThemeColors } from "../theme/colors";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -33,9 +35,30 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const formatAmount = (value: number) => `Gs. ${value.toLocaleString("es-PY")}`;
+const normalizeClientName = (value: string) => value.replace(/\s+/g, " ").trim();
+const normalizeAmountInput = (value: string) => value.replace(/\D/g, "");
+const normalizeDueDate = (value: string) => value.trim();
+const normalizeNotes = (value: string) => value.replace(/\s+/g, " ").trim();
 
-const ChargeCard = React.memo(({ item, styles }: { item: Charge; styles: any }) => (
-  <View style={styles.card}>
+const ChargeCard = React.memo(({
+  item,
+  styles,
+  onEdit,
+  onUpdateStatus,
+}: {
+  item: ChargeRecord;
+  styles: any;
+  onEdit: (charge: ChargeRecord) => void;
+  onUpdateStatus: (charge: ChargeRecord) => void;
+}) => (
+  <View
+    style={[
+      styles.card,
+      item.status === "atrasado" ? styles.cardOverdue : null,
+      item.status === "pagado" ? styles.cardPaid : null,
+      item.queued ? styles.cardQueued : null,
+    ]}
+  >
     <View style={styles.cardHeader}>
       <Text style={styles.client}>{item.client_name}</Text>
       <View
@@ -68,6 +91,20 @@ const ChargeCard = React.memo(({ item, styles }: { item: Charge; styles: any }) 
         Vence: {format(new Date(item.due_date), "dd MMM yyyy", { locale: es })}
       </Text>
     ) : null}
+    {item.notes ? <Text style={styles.notes}>{item.notes}</Text> : null}
+    {item.queued ? (
+      <View style={styles.queueBadge}>
+        <Text style={styles.queueBadgeText}>Pendiente de sync</Text>
+      </View>
+    ) : null}
+    <View style={styles.cardActions}>
+      <TouchableOpacity style={styles.secondaryButton} onPress={() => onEdit(item)}>
+        <Text style={styles.secondaryButtonText}>Editar</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.primaryButton} onPress={() => onUpdateStatus(item)}>
+        <Text style={styles.primaryButtonText}>Cambiar estado</Text>
+      </TouchableOpacity>
+    </View>
   </View>
 ));
 
@@ -78,9 +115,13 @@ export default function ChargesScreen() {
   const { data: charges = [], isLoading } = useChargesData(user?.id);
   const { data: clients = [] } = useClientsData();
   const createChargeMutation = useCreateCharge();
+  const updateChargeMutation = useUpdateCharge();
+  const updateChargeStatusMutation = useUpdateChargeStatus();
   const [modalVisible, setModalVisible] = useState(false);
   const [activePicker, setActivePicker] = useState<"client" | null>(null);
   const [search, setSearch] = useState("");
+  const [editingCharge, setEditingCharge] = useState<ChargeRecord | null>(null);
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [form, setForm] = useState({
     clientId: "",
     clientName: "",
@@ -89,23 +130,46 @@ export default function ChargesScreen() {
     notes: "",
   });
 
-  const filtered = useMemo(
-    () =>
-      charges.filter(
+  const filtered = useMemo(() => {
+    const searchTerm = search.toLowerCase().trim();
+    const getPriority = (charge: ChargeRecord) => {
+      if (charge.queued) return 0;
+      if (charge.status === "atrasado") return 1;
+      if (charge.status === "pendiente") return 2;
+      return 3;
+    };
+
+    return [...charges]
+      .filter(
         (charge) =>
-          !search.trim() ||
-          charge.client_name.toLowerCase().includes(search.toLowerCase())
-      ),
-    [charges, search]
-  );
+          !searchTerm || charge.client_name.toLowerCase().includes(searchTerm),
+      )
+      .sort((a, b) => getPriority(a) - getPriority(b));
+  }, [charges, search]);
 
   const openModal = () => {
+    setEditingCharge(null);
+    setTouched({});
     setForm({
       clientId: "",
       clientName: "",
       amount: "",
       dueDate: "",
       notes: "",
+    });
+    setActivePicker(null);
+    setModalVisible(true);
+  };
+
+  const openEditModal = (charge: ChargeRecord) => {
+    setEditingCharge(charge);
+    setTouched({});
+    setForm({
+      clientId: charge.client_id || "",
+      clientName: charge.client_name,
+      amount: String(charge.amount || ""),
+      dueDate: charge.due_date ? String(charge.due_date).slice(0, 10) : "",
+      notes: charge.notes || "",
     });
     setActivePicker(null);
     setModalVisible(true);
@@ -127,38 +191,87 @@ export default function ChargesScreen() {
     }
 
     setModalVisible(false);
+    setEditingCharge(null);
+    setTouched({});
   };
 
-  const modalTitle = activePicker === "client" ? "Seleccionar Cliente" : "Nuevo Cobro";
+  const markTouched = (field: string) => {
+    setTouched((current) => ({ ...current, [field]: true }));
+  };
+
+  const fieldErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const normalizedClientName = normalizeClientName(form.clientName);
+    const amount = Number.parseInt(normalizeAmountInput(form.amount), 10);
+    const normalizedDueDate = normalizeDueDate(form.dueDate);
+
+    if (!normalizedClientName) {
+      errors.clientName = "El cliente es obligatorio.";
+    }
+
+    if (!form.amount.trim()) {
+      errors.amount = "Ingrese un monto.";
+    } else if (Number.isNaN(amount) || amount <= 0) {
+      errors.amount = "Ingrese un monto valido.";
+    }
+
+    if (normalizedDueDate) {
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(normalizedDueDate)) {
+        errors.dueDate = "Use el formato YYYY-MM-DD.";
+      } else {
+        const dueDate = new Date(normalizedDueDate);
+        if (Number.isNaN(dueDate.getTime())) {
+          errors.dueDate = "La fecha no es valida.";
+        } else if (dueDate < startOfDay(new Date())) {
+          errors.dueDate = "La fecha no puede ser anterior a hoy.";
+        }
+      }
+    }
+
+    return errors;
+  }, [form.amount, form.clientName, form.dueDate]);
+
+  const modalTitle = activePicker === "client" ? "Seleccionar Cliente" : editingCharge ? "Editar Cobro" : "Nuevo Cobro";
 
   const saveCharge = async () => {
-    if (!user || !profile || !form.clientName.trim()) {
+    const normalizedClientName = normalizeClientName(form.clientName);
+    const normalizedAmount = normalizeAmountInput(form.amount);
+    const normalizedDueDate = normalizeDueDate(form.dueDate);
+    const normalizedNotes = normalizeNotes(form.notes);
+
+    if (!user || !profile || !normalizedClientName) {
+      markTouched("clientName");
       Alert.alert("Error", "El cliente es obligatorio");
       return;
     }
 
-    const amount = Number.parseInt(form.amount.replace(/\D/g, ""), 10);
+    const amount = Number.parseInt(normalizedAmount, 10);
     if (Number.isNaN(amount) || amount <= 0) {
+      markTouched("amount");
       Alert.alert("Error", "Ingrese un monto valido");
       return;
     }
 
-    if (form.dueDate) {
+    if (normalizedDueDate) {
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!dateRegex.test(form.dueDate)) {
+      if (!dateRegex.test(normalizedDueDate)) {
+        markTouched("dueDate");
         Alert.alert(
           "Error",
           "El formato de fecha debe ser exactamente YYYY-MM-DD"
         );
         return;
       }
-      const dueDate = new Date(form.dueDate);
+      const dueDate = new Date(normalizedDueDate);
       if (Number.isNaN(dueDate.getTime())) {
+        markTouched("dueDate");
         Alert.alert("Error", "La fecha ingresada no es válida en el calendario");
         return;
       }
       const today = startOfDay(new Date());
       if (dueDate < today) {
+        markTouched("dueDate");
         Alert.alert(
           "Error",
           "La fecha de vencimiento no puede ser anterior a hoy"
@@ -168,16 +281,30 @@ export default function ChargesScreen() {
     }
 
     try {
-      await createChargeMutation.mutateAsync({
-        userId: user.id,
-        vendorName: profile.full_name || user.email || "Vendedor",
-        clientId: form.clientId,
-        clientName: form.clientName,
-        amount,
-        dueDate: form.dueDate,
-        notes: form.notes,
-      });
+      if (editingCharge) {
+        await updateChargeMutation.mutateAsync({
+          userId: user.id,
+          chargeId: editingCharge.id,
+          clientId: form.clientId,
+          clientName: normalizedClientName,
+          amount,
+          dueDate: normalizedDueDate,
+          notes: normalizedNotes,
+        });
+      } else {
+        await createChargeMutation.mutateAsync({
+          userId: user.id,
+          vendorName: profile.full_name || user.email || "Vendedor",
+          clientId: form.clientId,
+          clientName: normalizedClientName,
+          amount,
+          dueDate: normalizedDueDate,
+          notes: normalizedNotes,
+        });
+      }
       setModalVisible(false);
+      setEditingCharge(null);
+      setTouched({});
     } catch (error) {
       Alert.alert(
         "Error",
@@ -186,8 +313,46 @@ export default function ChargesScreen() {
     }
   };
 
-  const renderCharge = ({ item }: { item: Charge }) => (
-    <ChargeCard item={item} styles={styles} />
+  const handleUpdateStatus = (charge: ChargeRecord) => {
+    if (!user) {
+      return;
+    }
+
+    const statusOptions = ["pendiente", "pagado", "atrasado"].filter(
+      (status) => status !== charge.status,
+    );
+
+    Alert.alert(
+      "Cambiar estado",
+      `Estado actual: ${STATUS_LABELS[charge.status] || charge.status}`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        ...statusOptions.map((status) => ({
+          text: STATUS_LABELS[status] || status,
+          onPress: () => {
+            void updateChargeStatusMutation.mutateAsync({
+              userId: user.id,
+              chargeId: charge.id,
+              status,
+            }).catch((error) => {
+              Alert.alert(
+                "Error",
+                error instanceof Error ? error.message : "No se pudo actualizar el estado",
+              );
+            });
+          },
+        })),
+      ],
+    );
+  };
+
+  const renderCharge = ({ item }: { item: ChargeRecord }) => (
+    <ChargeCard
+      item={item}
+      styles={styles}
+      onEdit={openEditModal}
+      onUpdateStatus={handleUpdateStatus}
+    />
   );
 
   return (
@@ -259,7 +424,7 @@ export default function ChargesScreen() {
           <ScrollView>
             <Text style={styles.label}>Cliente *</Text>
             <TouchableOpacity
-              style={styles.input}
+              style={[styles.input, touched.clientName && fieldErrors.clientName ? styles.inputError : null]}
               onPress={() => setActivePicker("client")}
             >
               <Text
@@ -268,6 +433,11 @@ export default function ChargesScreen() {
                 {form.clientName || "Seleccione un cliente"}
               </Text>
             </TouchableOpacity>
+            {touched.clientName && fieldErrors.clientName ? (
+              <Text style={styles.errorText}>{fieldErrors.clientName}</Text>
+            ) : (
+              <Text style={styles.helpText}>Seleccione un cliente existente para asociar el cobro.</Text>
+            )}
             <FormField
               label="Monto (Gs.)"
               placeholder="Ej: 150000"
@@ -275,10 +445,16 @@ export default function ChargesScreen() {
               onChangeText={(text) =>
                 setForm((current) => ({
                   ...current,
-                  amount: text.replace(/\D/g, ""),
+                  amount: normalizeAmountInput(text),
                 }))
               }
               keyboardType="number-pad"
+              onBlur={() => {
+                markTouched("amount");
+                setForm((current) => ({ ...current, amount: normalizeAmountInput(current.amount) }));
+              }}
+              error={touched.amount ? fieldErrors.amount : null}
+              helpText={!touched.amount ? "Solo numeros, sin puntos ni comas." : null}
             />
             <FormField
               label="Fecha de vencimiento (opcional)"
@@ -287,6 +463,12 @@ export default function ChargesScreen() {
               onChangeText={(text) =>
                 setForm((current) => ({ ...current, dueDate: text }))
               }
+              onBlur={() => {
+                markTouched("dueDate");
+                setForm((current) => ({ ...current, dueDate: normalizeDueDate(current.dueDate) }));
+              }}
+              error={touched.dueDate ? fieldErrors.dueDate : null}
+              helpText={!touched.dueDate ? "Ejemplo: 2026-12-31" : null}
             />
             <FormField
               label="Notas"
@@ -295,12 +477,19 @@ export default function ChargesScreen() {
               onChangeText={(text) =>
                 setForm((current) => ({ ...current, notes: text }))
               }
+              onBlur={() =>
+                setForm((current) => ({ ...current, notes: normalizeNotes(current.notes) }))
+              }
               multiline
             />
             <FormActions
-              isLoading={createChargeMutation.isPending}
-              submitLabel="Crear Cobro"
-              onCancel={() => setModalVisible(false)}
+              isLoading={createChargeMutation.isPending || updateChargeMutation.isPending}
+              submitLabel={editingCharge ? "Guardar cambios" : "Crear Cobro"}
+              onCancel={() => {
+                setModalVisible(false);
+                setEditingCharge(null);
+                setTouched({});
+              }}
               onSubmit={saveCharge}
             />
           </ScrollView>
@@ -352,6 +541,16 @@ const useStyles = (colors: ThemeColors) =>
           borderWidth: 1,
           borderColor: colors.border,
         },
+        cardOverdue: {
+          borderColor: colors.destructive,
+          backgroundColor: colors.destructiveMuted,
+        },
+        cardPaid: {
+          borderColor: colors.success,
+        },
+        cardQueued: {
+          borderColor: colors.warning,
+        },
         cardHeader: { flexDirection: "row", justifyContent: "space-between" },
         client: { fontSize: 16, fontWeight: "600", color: colors.foreground },
         statusBadge: {
@@ -373,6 +572,53 @@ const useStyles = (colors: ThemeColors) =>
           marginTop: 8,
         },
         due: { fontSize: 13, color: colors.mutedForeground, marginTop: 4 },
+        notes: { fontSize: 13, color: colors.foreground, marginTop: 8 },
+        queueBadge: {
+          alignSelf: "flex-start",
+          marginTop: 10,
+          paddingHorizontal: 10,
+          paddingVertical: 6,
+          borderRadius: 999,
+          backgroundColor: colors.warningMuted,
+        },
+        queueBadgeText: {
+          color: colors.warning,
+          fontSize: 12,
+          fontWeight: "700",
+        },
+        cardActions: {
+          flexDirection: "row",
+          gap: 8,
+          marginTop: 12,
+        },
+        primaryButton: {
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          backgroundColor: colors.primary,
+          borderRadius: 10,
+        },
+        primaryButtonText: {
+          color: colors.primaryForeground,
+          fontWeight: "600",
+        },
+        secondaryButton: {
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 10,
+          backgroundColor: colors.background,
+        },
+        secondaryButtonText: {
+          color: colors.foreground,
+          fontWeight: "600",
+        },
         modal: { maxHeight: "90%" },
         label: {
           fontSize: 14,
@@ -389,6 +635,9 @@ const useStyles = (colors: ThemeColors) =>
           marginBottom: 16,
           justifyContent: "center",
         },
+        inputError: {
+          borderColor: colors.destructive,
+        },
         inputText: {
           fontSize: 16,
           color: colors.foreground,
@@ -396,6 +645,18 @@ const useStyles = (colors: ThemeColors) =>
         placeholderText: {
           fontSize: 16,
           color: colors.mutedForeground,
+        },
+        helpText: {
+          marginTop: -10,
+          marginBottom: 16,
+          fontSize: 12,
+          color: colors.mutedForeground,
+        },
+        errorText: {
+          marginTop: -10,
+          marginBottom: 16,
+          fontSize: 12,
+          color: colors.destructive,
         },
         clientItem: {
           padding: 16,

@@ -1,11 +1,12 @@
-import { backendApi } from "../backend-api";
+import { asItemsArray, backendApi, type CollectionResponse } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
 import type { Client } from "./types";
 
 export async function fetchClients(): Promise<Client[]> {
-  return backendApi.get<Client[]>("/clients?order=name");
+  const response = await backendApi.get<CollectionResponse<Client>>("/clients?order=name");
+  return asItemsArray(response);
 }
 
 export async function createClient(input: {

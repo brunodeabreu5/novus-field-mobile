@@ -24,7 +24,7 @@ export function useCreateClient() {
         if (current.some((item) => item.id === result.client.id)) {
           return current;
         }
-        return [result.client, ...current];
+        return [{ ...result.client, queued: result.queued }, ...current];
       });
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.dashboard(variables.userId),

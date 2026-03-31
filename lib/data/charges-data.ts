@@ -1,11 +1,14 @@
-import { backendApi } from "../backend-api";
+import { asItemsArray, backendApi, type CollectionResponse } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
 import type { Charge } from "./types";
 
 export async function fetchCharges(userId: string): Promise<Charge[]> {
-  return backendApi.get<Charge[]>(`/charges?vendorId=${encodeURIComponent(userId)}`);
+  const response = await backendApi.get<CollectionResponse<Charge>>(
+    `/charges?vendorId=${encodeURIComponent(userId)}`,
+  );
+  return asItemsArray(response);
 }
 
 export async function createCharge(input: {
@@ -61,4 +64,32 @@ export async function createCharge(input: {
     }
     throw error;
   }
+}
+
+export async function updateCharge(input: {
+  userId: string;
+  chargeId: string;
+  clientId: string;
+  clientName: string;
+  amount: number;
+  dueDate: string;
+  notes: string;
+}) {
+  return backendApi.patch<Charge>(`/charges/${encodeURIComponent(input.chargeId)}`, {
+    client_id: input.clientId || null,
+    client_name: input.clientName.trim(),
+    amount: input.amount,
+    due_date: input.dueDate || null,
+    notes: input.notes.trim() || null,
+  });
+}
+
+export async function updateChargeStatus(input: {
+  userId: string;
+  chargeId: string;
+  status: string;
+}) {
+  return backendApi.patch<Charge>(`/charges/${encodeURIComponent(input.chargeId)}/status`, {
+    status: input.status,
+  });
 }
