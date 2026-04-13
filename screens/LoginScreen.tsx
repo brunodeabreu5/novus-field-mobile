@@ -21,14 +21,12 @@ interface LoginScreenProps {
 }
 
 export default function LoginScreen({ onSuccess }: LoginScreenProps) {
-  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
   const { tenant, clearTenant } = useTenant();
 
   const validate = (): boolean => {
@@ -49,10 +47,6 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
       setError("La contrasena debe tener al menos 6 caracteres");
       return false;
     }
-    if (isSignUp && !fullName.trim()) {
-      setError("El nombre es obligatorio");
-      return false;
-    }
     return true;
   };
 
@@ -62,13 +56,8 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
 
     setIsLoading(true);
     try {
-      if (isSignUp) {
-        await signUp(email.trim(), password, fullName.trim());
-        setError(null);
-      } else {
-        await signIn(email.trim(), password);
-        onSuccess();
-      }
+      await signIn(email.trim(), password);
+      onSuccess();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Algo salio mal. Intente de nuevo."
@@ -118,26 +107,10 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
         </View>
 
         <View style={styles.form}>
-          <Text style={styles.formTitle}>
-            {isSignUp ? "Crear cuenta" : "Bienvenido de vuelta"}
-          </Text>
+          <Text style={styles.formTitle}>Bienvenido de vuelta</Text>
           <Text style={styles.formSubtitle}>
-            {isSignUp
-              ? "Complete los datos para crear su cuenta"
-              : "Ingrese sus credenciales para continuar"}
+            Ingrese sus credenciales para continuar
           </Text>
-
-          {isSignUp ? (
-            <TextInput
-              style={styles.input}
-              placeholder="Nombre completo"
-              placeholderTextColor={colors.mutedForeground}
-              value={fullName}
-              onChangeText={setFullName}
-              autoCapitalize="words"
-              editable={!isLoading}
-            />
-          ) : null}
 
           <TextInput
             style={styles.input}
@@ -182,25 +155,8 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
             {isLoading ? (
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
-              <Text style={styles.buttonText}>
-                {isSignUp ? "Crear cuenta" : "Iniciar sesion"}
-              </Text>
+              <Text style={styles.buttonText}>Iniciar sesion</Text>
             )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.toggle}
-            onPress={() => {
-              setIsSignUp(!isSignUp);
-              setError(null);
-            }}
-          >
-            <Text style={styles.toggleText}>
-              {isSignUp ? "Ya tiene una cuenta? " : "No tiene una cuenta? "}
-              <Text style={styles.toggleLink}>
-                {isSignUp ? "Iniciar sesion" : "Crear cuenta"}
-              </Text>
-            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

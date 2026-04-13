@@ -1,4 +1,5 @@
 import { asItemsArray, backendApi, type CollectionResponse } from "./backend-api";
+import * as FileSystem from "expo-file-system/legacy";
 import { logger } from "./logger";
 import {
   type ChargeCreateAction,
@@ -23,6 +24,17 @@ interface SyncQueuedActionsOptions {
 }
 
 let syncInFlight: Promise<number> | null = null;
+
+async function deleteLocalFileIfExists(uri: string) {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+    }
+  } catch {
+    // Avoid retry loops caused by cleanup only.
+  }
+}
 
 async function fetchDefaultVisitTypeName() {
   try {
@@ -454,6 +466,8 @@ async function syncVisitAttachmentUpload(action: VisitAttachmentUploadAction): P
     file_size_bytes: payload.fileSizeBytes,
     attachment_kind: payload.attachmentKind,
   });
+
+  await deleteLocalFileIfExists(payload.localUri);
 }
 
 async function uploadFileFromUri(

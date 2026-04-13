@@ -57,6 +57,7 @@ const EMPTY_VISITS: VisitRecord[] = [];
 const normalizeClientName = (value: string) => value.replace(/\s+/g, " ").trim();
 const normalizeVisitType = (value: string) => value.replace(/\s+/g, " ").trim();
 const normalizeNotes = (value: string) => value.replace(/\s+/g, " ").trim();
+const ATTACHMENTS_DIRECTORY = `${FileSystem.documentDirectory || FileSystem.cacheDirectory}visit-attachments`;
 
 async function resolveCurrentLocation() {
   try {
@@ -122,6 +123,51 @@ function buildDraftAttachment(input: {
     file_size_bytes: input.size ?? null,
     attachment_kind: input.attachmentKind,
   };
+}
+
+async function ensureAttachmentsDirectory() {
+  const info = await FileSystem.getInfoAsync(ATTACHMENTS_DIRECTORY);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(ATTACHMENTS_DIRECTORY, { intermediates: true });
+  }
+}
+
+function sanitizeAttachmentFileName(fileName: string) {
+  return fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function persistAttachmentUri(uri: string, fileName: string) {
+  await ensureAttachmentsDirectory();
+
+  const sanitizedName = sanitizeAttachmentFileName(fileName);
+  const targetUri = `${ATTACHMENTS_DIRECTORY}/${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}-${sanitizedName}`;
+
+  await FileSystem.copyAsync({
+    from: uri,
+    to: targetUri,
+  });
+
+  return targetUri;
+}
+
+async function buildPersistedDraftAttachment(input: {
+  uri: string;
+  fileName: string;
+  mimeType?: string | null;
+  size?: number | null;
+  attachmentKind: "image" | "document";
+}) {
+  const persistedUri = await persistAttachmentUri(input.uri, input.fileName);
+
+  return buildDraftAttachment({
+    uri: persistedUri,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    size: input.size,
+    attachmentKind: input.attachmentKind,
+  });
 }
 
 type VisitsStyles = Record<string, any>;
@@ -683,14 +729,16 @@ export default function VisitsScreen() {
 
     if (result.canceled) return [];
 
-    return result.assets.map((asset) =>
-      buildDraftAttachment({
-        uri: asset.uri,
-        fileName: asset.fileName || `foto-${Date.now()}.jpg`,
-        mimeType: asset.mimeType || "image/jpeg",
-        size: asset.fileSize ?? null,
-        attachmentKind: "image",
-      }),
+    return Promise.all(
+      result.assets.map((asset) =>
+        buildPersistedDraftAttachment({
+          uri: asset.uri,
+          fileName: asset.fileName || `foto-${Date.now()}.jpg`,
+          mimeType: asset.mimeType || "image/jpeg",
+          size: asset.fileSize ?? null,
+          attachmentKind: "image",
+        }),
+      ),
     );
   };
 
@@ -709,14 +757,16 @@ export default function VisitsScreen() {
 
     if (result.canceled) return [];
 
-    return result.assets.map((asset) =>
-      buildDraftAttachment({
-        uri: asset.uri,
-        fileName: asset.fileName || `imagen-${Date.now()}.jpg`,
-        mimeType: asset.mimeType || "image/jpeg",
-        size: asset.fileSize ?? null,
-        attachmentKind: "image",
-      }),
+    return Promise.all(
+      result.assets.map((asset) =>
+        buildPersistedDraftAttachment({
+          uri: asset.uri,
+          fileName: asset.fileName || `imagen-${Date.now()}.jpg`,
+          mimeType: asset.mimeType || "image/jpeg",
+          size: asset.fileSize ?? null,
+          attachmentKind: "image",
+        }),
+      ),
     );
   };
 
@@ -728,14 +778,16 @@ export default function VisitsScreen() {
 
     if (result.canceled) return [];
 
-    return result.assets.map((asset) =>
-      buildDraftAttachment({
-        uri: asset.uri,
-        fileName: asset.name,
-        mimeType: asset.mimeType || "application/octet-stream",
-        size: asset.size ?? null,
-        attachmentKind: "document",
-      }),
+    return Promise.all(
+      result.assets.map((asset) =>
+        buildPersistedDraftAttachment({
+          uri: asset.uri,
+          fileName: asset.name,
+          mimeType: asset.mimeType || "application/octet-stream",
+          size: asset.size ?? null,
+          attachmentKind: "document",
+        }),
+      ),
     );
   };
 

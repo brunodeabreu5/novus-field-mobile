@@ -1,5 +1,6 @@
 import { endOfDay, startOfDay, startOfWeek } from "date-fns";
 import { es } from "date-fns/locale";
+import * as FileSystem from "expo-file-system/legacy";
 import { asItemsArray, backendApi, type CollectionResponse } from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
@@ -21,6 +22,17 @@ function toQueuedVisitAttachment(visitId: string, attachment: DraftVisitAttachme
     fileSizeBytes: attachment.file_size_bytes,
     attachmentKind: attachment.attachment_kind,
   } as const;
+}
+
+async function deleteLocalFileIfExists(uri: string) {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+    }
+  } catch {
+    // Keep upload success even if cleanup fails.
+  }
 }
 
 export async function fetchVisits(userId: string, period: VisitPeriod): Promise<VisitRecord[]> {
@@ -175,13 +187,17 @@ async function uploadVisitAttachment(visitId: string, attachment: DraftVisitAtta
     throw new Error(`Upload failed: HTTP ${uploadResponse.status}`);
   }
 
-  return backendApi.post<VisitAttachment>(`/visits/${visitId}/attachments`, {
+  const created = await backendApi.post<VisitAttachment>(`/visits/${visitId}/attachments`, {
     storage_path: uploadTarget.storage_path,
     file_name: attachment.file_name,
     mime_type: attachment.mime_type,
     file_size_bytes: attachment.file_size_bytes,
     attachment_kind: attachment.attachment_kind,
   });
+
+  await deleteLocalFileIfExists(attachment.uri);
+
+  return created;
 }
 
 export async function uploadVisitAttachments(

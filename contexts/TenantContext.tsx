@@ -8,6 +8,10 @@ import React, {
 } from "react";
 import { clearStoredAuthState } from "../lib/backend-auth";
 import {
+  buildResolvePayload,
+  revalidateStoredTenant,
+} from "../lib/tenant-bootstrap";
+import {
   clearTenantConfig,
   getTenantConfig,
   resolveTenantConfig,
@@ -25,19 +29,6 @@ interface TenantContextType {
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
 
-function buildResolvePayload(identifier: string) {
-  const trimmed = identifier.trim();
-  if (!trimmed) {
-    throw new Error("Informe o codigo ou slug da empresa");
-  }
-
-  if (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(trimmed)) {
-    return { slug: trimmed.toLowerCase() };
-  }
-
-  return { companyCode: trimmed.toUpperCase() };
-}
-
 export function TenantProvider({ children }: { children: ReactNode }) {
   const [tenant, setTenant] = useState<TenantRuntimeConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,8 +39,16 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     async function bootstrap() {
       try {
         const stored = await getTenantConfig();
+        const nextTenant = await revalidateStoredTenant(stored, resolveTenantConfig);
+
+        if (stored && !nextTenant) {
+          await clearTenantConfig();
+        } else if (nextTenant && nextTenant !== stored) {
+          await saveTenantConfig(nextTenant);
+        }
+
         if (!cancelled) {
-          setTenant(stored);
+          setTenant(nextTenant);
         }
       } finally {
         if (!cancelled) {
@@ -72,6 +71,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     async resolveTenant(identifier: string) {
       const payload = buildResolvePayload(identifier);
       const resolved = await resolveTenantConfig(payload);
+      if (resolved.status !== "active") {
+        throw new Error("A empresa informada nao esta ativa.");
+      }
       await saveTenantConfig(resolved);
       await clearStoredAuthState();
       setTenant(resolved);

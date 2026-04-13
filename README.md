@@ -34,6 +34,14 @@ EXPO_PUBLIC_WS_URL=http://localhost:4000
 npm install
 ```
 
+### Ambientes de build
+
+- `.env` e `.env.development`: desenvolvimento local
+- `.env.production`: build de produção
+- `eas.json` define `APP_ENV` explicitamente por perfil para que `app.config.ts` carregue o arquivo correto
+
+Para builds EAS de produção, preencha os valores reais de produção em `.env.production` ou defina as mesmas variáveis no ambiente do EAS. Variáveis já definidas no ambiente do EAS têm prioridade sobre os arquivos `.env`.
+
 ## Executar
 
 ```bash

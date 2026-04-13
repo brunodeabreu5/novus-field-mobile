@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import type { Profile } from "../contexts/AuthContext";
 import { clearAuthMemoryCache } from "./backend-auth";
 
@@ -15,6 +16,7 @@ export async function isProfileDismissed(): Promise<boolean> {
 }
 
 export async function clearStaleAuthStorage() {
+  await SecureStore.deleteItemAsync("backend_auth_session");
   await AsyncStorage.removeItem("backend_auth_session");
   clearAuthMemoryCache();
 }

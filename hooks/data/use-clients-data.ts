@@ -40,7 +40,11 @@ export function useUpdateClient() {
     mutationFn: updateClient,
     onSuccess: (result, variables) => {
       queryClient.setQueryData<Client[]>(mobileQueryKeys.clients, (current = []) =>
-        current.map((item) => (item.id === result.client.id ? result.client : item)),
+        current.map((item) =>
+          item.id === result.client.id
+            ? { ...result.client, queued: result.queued }
+            : item,
+        ),
       );
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.dashboard(variables.userId),

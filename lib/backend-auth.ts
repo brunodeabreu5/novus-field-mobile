@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import { getBackendApiUrl } from "./tenant-config";
 
 export type AppRole = "admin" | "manager" | "vendor";
@@ -63,6 +64,45 @@ const listeners = new Set<(snapshot: AuthSnapshot) => void>();
 let authStateMemory: StoredAuthState | null = null;
 let authStateMemoryReady = false;
 
+async function readAuthStorage(): Promise<string | null> {
+  try {
+    const secureValue = await SecureStore.getItemAsync(AUTH_STORAGE_KEY);
+    if (secureValue) {
+      return secureValue;
+    }
+  } catch {}
+
+  const legacyValue = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+  if (legacyValue) {
+    try {
+      await SecureStore.setItemAsync(AUTH_STORAGE_KEY, legacyValue);
+      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch {
+      return legacyValue;
+    }
+    return legacyValue;
+  }
+
+  return null;
+}
+
+async function writeAuthStorage(value: string | null) {
+  if (value === null) {
+    try {
+      await SecureStore.deleteItemAsync(AUTH_STORAGE_KEY);
+    } catch {}
+    await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    return;
+  }
+
+  try {
+    await SecureStore.setItemAsync(AUTH_STORAGE_KEY, value);
+    await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {
+    await AsyncStorage.setItem(AUTH_STORAGE_KEY, value);
+  }
+}
+
 /** Call if `backend_auth_session` is removed outside this module (e.g. legacy cleanup). */
 export function clearAuthMemoryCache() {
   authStateMemory = null;
@@ -114,7 +154,7 @@ async function readStoredState(): Promise<StoredAuthState | null> {
     return authStateMemory;
   }
 
-  const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+  const raw = await readAuthStorage();
   if (!raw) {
     authStateMemory = null;
     authStateMemoryReady = true;
@@ -126,7 +166,7 @@ async function readStoredState(): Promise<StoredAuthState | null> {
     authStateMemoryReady = true;
     return authStateMemory;
   } catch {
-    await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    await writeAuthStorage(null);
     authStateMemory = null;
     authStateMemoryReady = true;
     return null;
@@ -138,11 +178,11 @@ async function writeStoredState(state: StoredAuthState | null) {
   authStateMemoryReady = true;
 
   if (!state) {
-    await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    await writeAuthStorage(null);
     return;
   }
 
-  await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(state));
+  await writeAuthStorage(JSON.stringify(state));
 }
 
 function emit(state: StoredAuthState | null) {

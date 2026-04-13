@@ -162,11 +162,6 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       const nextPermission = mapPermissionStatus(status);
       setLocationPermission(nextPermission);
       if (nextPermission === "granted") {
-        if (!isExpoGo) {
-          const { status: backgroundStatus } =
-            await Location.requestBackgroundPermissionsAsync();
-          setBackgroundLocationPermission(mapPermissionStatus(backgroundStatus));
-        }
         await loadCurrentLocation();
       } else {
         setLastLocation(null);

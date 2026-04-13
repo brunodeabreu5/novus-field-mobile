@@ -78,6 +78,7 @@ interface DeviceSectionProps {
   readonly trackingState: TrackingState;
   readonly trackingError: string | null;
   readonly refreshPermissions: () => Promise<void>;
+  readonly requestBackgroundLocationPermission: () => Promise<void>;
   readonly requestNotificationPermission: () => Promise<void>;
 }
 
@@ -91,7 +92,6 @@ function StatusCard({ children }: StatusCardProps) {
 
 interface GpsStatusCardProps {
   readonly locationPermission: PermissionState;
-  readonly backgroundLocationPermission: PermissionState;
   readonly lastLocation: { lat: number; lng: number } | null;
   readonly isWeb: boolean;
   readonly isLoading: boolean;
@@ -99,7 +99,6 @@ interface GpsStatusCardProps {
 
 function GpsStatusCard({
   locationPermission,
-  backgroundLocationPermission,
   lastLocation,
   isWeb,
   isLoading,
@@ -108,11 +107,11 @@ function GpsStatusCard({
   let statusStyle: StyleProp<TextStyle> = styles.testValue;
   let showCoordinates = false;
 
-  if (locationPermission === "granted" && backgroundLocationPermission === "granted") {
+  if (locationPermission === "granted") {
     statusText = "OK";
     statusStyle = styles.testValueSuccess;
     showCoordinates = true;
-  } else if (locationPermission === "denied" || backgroundLocationPermission === "denied") {
+  } else if (locationPermission === "denied") {
     statusText = "Bloqueado";
     statusStyle = styles.testError;
   }
@@ -145,19 +144,25 @@ function GpsStatusCard({
         </Text>
       ) : null}
       <Text style={styles.testSubtext}>
-        El rastreo es obligatorio para vendedores. Al iniciar sesion, la app
-        solicitara permisos de ubicacion y no continuara si el sistema los bloquea.
+        El GPS se usa para visitas, clientes en mapa y rastreo. La ubicacion en
+        segundo plano se activa por separado.
       </Text>
     </StatusCard>
   );
 }
 
 interface BackgroundStatusCardProps {
+  readonly locationPermission: PermissionState;
   readonly backgroundLocationPermission: PermissionState;
+  readonly isLoading: boolean;
+  readonly onRequestBackgroundLocationPermission: () => Promise<void>;
 }
 
 function BackgroundStatusCard({
+  locationPermission,
   backgroundLocationPermission,
+  isLoading,
+  onRequestBackgroundLocationPermission,
 }: BackgroundStatusCardProps) {
   let statusText = "Pendente";
   let statusStyle: StyleProp<TextStyle> = styles.testValue;
@@ -174,6 +179,8 @@ function BackgroundStatusCard({
     "Sin este permiso, el vendedor quedara bloqueado y no podra seguir reportando ubicacion.";
   if (backgroundLocationPermission === "granted") {
     description = "El rastreo queda activo aunque la app pase a segundo plano.";
+  } else if (locationPermission !== "granted") {
+    description = "Primero autorice el GPS normal para poder activar el rastreo continuo.";
   }
 
   return (
@@ -181,6 +188,17 @@ function BackgroundStatusCard({
       <Text style={styles.testLabel}>GPS en background</Text>
       <Text style={[styles.testValue, statusStyle]}>{statusText}</Text>
       <Text style={styles.testSubtext}>{description}</Text>
+      {backgroundLocationPermission !== "granted" ? (
+        <TouchableOpacity
+          style={[styles.testBtn, styles.testBtnPrimary]}
+          onPress={() => {
+            void onRequestBackgroundLocationPermission();
+          }}
+          disabled={isLoading || locationPermission !== "granted"}
+        >
+          <Text style={styles.testBtnTextPrimary}>Ativar GPS em background</Text>
+        </TouchableOpacity>
+      ) : null}
     </StatusCard>
   );
 }
@@ -367,6 +385,7 @@ function DeviceSection({
   trackingState,
   trackingError,
   refreshPermissions,
+  requestBackgroundLocationPermission,
   requestNotificationPermission,
 }: DeviceSectionProps) {
   return (
@@ -374,13 +393,15 @@ function DeviceSection({
       <Text style={styles.testSectionTitle}>Dispositivo</Text>
       <GpsStatusCard
         locationPermission={locationPermission}
-        backgroundLocationPermission={backgroundLocationPermission}
         lastLocation={lastLocation}
         isWeb={isWeb}
         isLoading={isLoading}
       />
       <BackgroundStatusCard
+        locationPermission={locationPermission}
         backgroundLocationPermission={backgroundLocationPermission}
+        isLoading={isLoading}
+        onRequestBackgroundLocationPermission={requestBackgroundLocationPermission}
       />
       <TrackingStatusCard
         trackingState={trackingState}
@@ -440,6 +461,7 @@ export default function AccountScreen() {
     isLoading,
     lastError,
     refreshPermissions,
+    requestBackgroundLocationPermission,
     requestNotificationPermission,
   } = useDevicePermissions();
   const { trackingState, trackingError } = useTrackingStatus();
@@ -605,6 +627,7 @@ export default function AccountScreen() {
         trackingState={trackingState}
         trackingError={trackingError}
         refreshPermissions={refreshPermissions}
+        requestBackgroundLocationPermission={requestBackgroundLocationPermission}
         requestNotificationPermission={requestNotificationPermission}
       />
 
@@ -739,6 +762,3 @@ const styles = StyleSheet.create({
   },
   switchTenantText: { color: colors.primary, fontWeight: "600" },
 });
-
-
-
