@@ -42,6 +42,14 @@ npm install
 
 Para builds EAS de produção, preencha os valores reais de produção em `.env.production` ou defina as mesmas variáveis no ambiente do EAS. Variáveis já definidas no ambiente do EAS têm prioridade sobre os arquivos `.env`.
 
+Variáveis públicas esperadas:
+
+- `EXPO_PUBLIC_API_URL`: backend com `/api`, por exemplo `https://api.seudominio.com/api`.
+- `EXPO_PUBLIC_WS_URL`: base do WebSocket sem `/api`.
+- `EXPO_PUBLIC_CONTROL_API_URL`: API do control com `/api`, usada para resolver a empresa no bootstrap.
+- `EXPO_PUBLIC_MAPBOX_TOKEN`: token público Mapbox para mapas nativos.
+- `EXPO_PUBLIC_PROJECT_ID`: opcional; use apenas UUID real de projeto Expo/EAS quando push estiver configurado.
+
 ## Executar
 
 ```bash
@@ -88,7 +96,11 @@ novus-field-mobile/
 
 ## Push Notifications
 
-O hook de permissões registra o token Expo no backend. Sem `projectId` válido, o app degrada silenciosamente e não tenta registrar push. Para envio real, use metadata do EAS ou um UUID real de projeto Expo/EAS.
+O hook de permissões registra o token Expo no backend. Sem `projectId` válido, o app degrada silenciosamente e não tenta registrar push.
+
+Para push remoto real no Android, o APK precisa de credenciais FCM/Firebase. Use um build EAS com credenciais push configuradas ou inclua o `google-services.json` correto no projeto Android antes de gerar APK local. Sem isso, a permissão local pode ser concedida, mas o Expo Push Token ou a entrega remota podem falhar.
+
+Para push remoto real no iOS via TestFlight/App Store, o app precisa da capability Apple Push Notifications, provisioning profile com APNs e credenciais APNs configuradas no Expo/EAS ou no fluxo nativo usado. O entitlement iOS está direcionado para `aps-environment=production`; builds locais/debug via Xcode normalmente usam APNs de desenvolvimento.
 
 ## Geolocalização
 
@@ -101,6 +113,16 @@ Antes de publicar ou distribuir build interna, rode:
 ```bash
 npm run check
 ```
+
+Checklist de release:
+
+```bash
+npm run typecheck
+npm run test
+cd android && ./gradlew clean assembleRelease
+```
+
+Para iOS, valide archive no Xcode/TestFlight com APNs/provisioning configurados.
 
 Smoke test manual mínimo:
 

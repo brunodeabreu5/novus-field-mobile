@@ -15,6 +15,9 @@
     "ios": {
       "bundleIdentifier": "com.novusfield.mobile",
       "supportsTablet": true,
+      "entitlements": {
+        "aps-environment": "production"
+      },
       "infoPlist": {
         "UIBackgroundModes": [
           "location",
@@ -37,6 +40,9 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.RECORD_AUDIO"
       ],
       "package": "com.novusfield.mobile"
@@ -67,7 +73,6 @@
     ],
     "extra": {
       "appEnv": "development",
-      "mapboxToken": "pk.eyJ1Ijoibm92dXNpbyIsImEiOiJjbWx2ZjgxdDUwNjl0M2RwdmsxMmU0aThvIn0.fpLJz9DUR9tRXpS1EkMvGg",
       "eas": {
         "projectId": "57d60f5e-5f6c-4cbf-8ea2-9af98afe8a49"
       }

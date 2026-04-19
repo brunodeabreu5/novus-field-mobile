@@ -19,6 +19,7 @@ const TRACKING_VENDOR_ID_KEY = "novus_tracking_vendor_id";
 const TRACKING_LAST_LOCATION_KEY = "novus_tracking_last_location";
 const TRACKING_INTERVAL_MS = 10_000;
 const TRACKING_MIN_DISPLACEMENT_M = 10;
+const TRACKING_BACKGROUND_DISPLACEMENT_M = 0;
 const TRACKING_HEARTBEAT_MS = 60_000;
 
 let taskDefined = false;
@@ -79,8 +80,8 @@ function formatSpeedKmh(speed: number | null | undefined) {
   return speed * 3.6;
 }
 
-function buildIdleSnapshot(loc: Location.LocationObject) {
-  const timestampMs = loc.timestamp ?? Date.now();
+function buildIdleSnapshot(loc: Location.LocationObject, forceFreshTimestamp = false) {
+  const timestampMs = forceFreshTimestamp ? Date.now() : loc.timestamp ?? Date.now();
   const snapshot = {
     latitude: loc.coords.latitude,
     longitude: loc.coords.longitude,
@@ -114,7 +115,8 @@ function buildLocationFromSnapshot(snapshot: CachedTrackingLocation) {
 
 function calculateIdleState(
   loc: Location.LocationObject,
-  lastLocationRaw: string | null
+  lastLocationRaw: string | null,
+  timestampMs: number
 ) {
   let isIdle = false;
   let idleDurationSeconds: number | null = null;
@@ -132,7 +134,7 @@ function calculateIdleState(
       );
       const elapsedSeconds = Math.max(
         0,
-        Math.round(((loc.timestamp ?? Date.now()) - previous.timestamp) / 1000)
+        Math.round((timestampMs - previous.timestamp) / 1000)
       );
 
       if (distance < TRACKING_MIN_DISPLACEMENT_M) {
@@ -257,6 +259,7 @@ async function processBackgroundLocationBatch(vendorId: string, locations: Locat
 
     try {
       await persistPosition(vendorId, fallbackLocation, {
+        force: true,
         trackingMode: "background",
       });
       await processGeofencePositionInBackground({
@@ -401,19 +404,26 @@ async function initializeTrackingSession(
   }
 
   const started = await Location.hasStartedLocationUpdatesAsync(TRACKING_TASK_NAME);
-  if (!started) {
-    await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
-      accuracy: Location.Accuracy.Highest,
-      timeInterval: TRACKING_INTERVAL_MS,
-      distanceInterval: TRACKING_MIN_DISPLACEMENT_M,
-      pausesUpdatesAutomatically: false,
-      showsBackgroundLocationIndicator: true,
-      foregroundService: {
-        notificationTitle: NOTIFICATION_TEXTS.tracking.foregroundService.title,
-        notificationBody: NOTIFICATION_TEXTS.tracking.foregroundService.body,
-      },
-    });
+  if (started) {
+    await Location.stopLocationUpdatesAsync(TRACKING_TASK_NAME);
   }
+
+  await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
+    accuracy: Location.Accuracy.Highest,
+    timeInterval: TRACKING_INTERVAL_MS,
+    distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
+    deferredUpdatesDistance: TRACKING_BACKGROUND_DISPLACEMENT_M,
+    deferredUpdatesInterval: TRACKING_INTERVAL_MS,
+    mayShowUserSettingsDialog: true,
+    pausesUpdatesAutomatically: false,
+    showsBackgroundLocationIndicator: true,
+    foregroundService: {
+      notificationTitle: NOTIFICATION_TEXTS.tracking.foregroundService.title,
+      notificationBody: NOTIFICATION_TEXTS.tracking.foregroundService.body,
+      notificationColor: "#0f172a",
+      killServiceOnDestroy: false,
+    },
+  });
 
   const currentLocation = await resolveCurrentLocation();
   if (currentLocation) {
@@ -505,10 +515,17 @@ async function persistPosition(
   loc: Location.LocationObject,
   options: TrackingPersistenceOptions
 ) {
-  const { snapshot: lastLocationSnapshot, timestampMs } = buildIdleSnapshot(loc);
+  const { snapshot: lastLocationSnapshot, timestampMs } = buildIdleSnapshot(
+    loc,
+    options.force === true
+  );
   const timestampIso = new Date(timestampMs).toISOString();
   const lastLocationRaw = await AsyncStorage.getItem(TRACKING_LAST_LOCATION_KEY);
-  const { isIdle, idleDurationSeconds } = calculateIdleState(loc, lastLocationRaw);
+  const { isIdle, idleDurationSeconds } = calculateIdleState(
+    loc,
+    lastLocationRaw,
+    timestampMs
+  );
 
   try {
     await AsyncStorage.setItem(

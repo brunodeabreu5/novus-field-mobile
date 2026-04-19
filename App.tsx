@@ -13,6 +13,7 @@ import { ChatPresenceProvider } from "./providers/ChatPresenceProvider";
 import { TrackingProvider } from "./providers/TrackingProvider";
 import RootNavigator from "./navigation/RootNavigator";
 import { colors } from "./theme/colors";
+import "./lib/mobile-notifications";
 
 const queryClient = new QueryClient();
 

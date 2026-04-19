@@ -31,6 +31,22 @@ import { colors } from "../theme/colors";
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
+type ChatNotificationTarget = {
+  contactId?: string;
+  messageId?: string;
+};
+
+function readStringPayloadValue(data: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
 function LoadingScreen() {
   return (
     <View style={styles.loading}>
@@ -232,20 +248,19 @@ export default function RootNavigator() {
   const { configured } = useTenant();
   const { session, loading, biometricLoading, biometricRequired } = useAuth();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
-  const pendingContactIdRef = useRef<string | null>(null);
+  const pendingChatNotificationRef = useRef<ChatNotificationTarget | null>(null);
 
   const navigateToChatNotification = useCallback(
-    (contactId?: string | null) => {
-      if (!contactId) return;
-
+    (target?: ChatNotificationTarget | null) => {
+      if (!target?.contactId && !target?.messageId) return;
       if (!navigationRef.isReady()) {
-        pendingContactIdRef.current = contactId;
+        pendingChatNotificationRef.current = target;
         return;
       }
 
       navigationRef.navigate("Main", {
         screen: "Chat",
-        params: { contactId },
+        params: target.contactId ? { contactId: target.contactId } : undefined,
       });
     },
     [navigationRef]
@@ -253,25 +268,26 @@ export default function RootNavigator() {
 
   const handleNotificationData = useCallback(
     (data: Record<string, unknown> | undefined) => {
-      if (data?.type !== "chat") {
+      if (!session || data?.type !== "chat") {
         return;
       }
 
-      const contactId =
-        typeof data.contactId === "string"
-          ? data.contactId
-          : typeof data.senderId === "string"
-            ? data.senderId
-            : null;
+      const contactId = readStringPayloadValue(data, [
+        "contactId",
+        "contact_id",
+        "senderId",
+        "sender_id",
+      ]);
+      const messageId = readStringPayloadValue(data, ["messageId", "message_id", "id"]);
 
-      navigateToChatNotification(contactId);
+      navigateToChatNotification({ contactId, messageId });
     },
-    [navigateToChatNotification]
+    [navigateToChatNotification, session]
   );
 
   useEffect(() => {
     if (!session) {
-      pendingContactIdRef.current = null;
+      pendingChatNotificationRef.current = null;
       return;
     }
 
@@ -328,10 +344,10 @@ export default function RootNavigator() {
     <NavigationContainer
       ref={navigationRef}
       onReady={() => {
-        if (pendingContactIdRef.current) {
-          const contactId = pendingContactIdRef.current;
-          pendingContactIdRef.current = null;
-          navigateToChatNotification(contactId);
+        if (pendingChatNotificationRef.current) {
+          const target = pendingChatNotificationRef.current;
+          pendingChatNotificationRef.current = null;
+          navigateToChatNotification(target);
         }
       }}
     >
