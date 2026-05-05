@@ -106,6 +106,16 @@ Para push remoto real no iOS via TestFlight/App Store, o app precisa da capabili
 
 `useVendorTracking` envia posições ao backend para o mapa do manager. O app suporta `foreground_only` e `background`, dependendo da permissão real concedida.
 
+O registo do handler `expo-task-manager` para localização em background é feito no arranque via [`lib/register-vendor-tracking-task.ts`](lib/register-vendor-tracking-task.ts) (importado em [`index.ts`](index.ts)), antes do bootstrap condicional do tenant, para o processo relançado pelo SO ter sempre a task definida.
+
+Com permissão **Always** / background concedida, o envio contínuo em segundo plano usa `startLocationUpdatesAsync`; em `foreground_only` usa-se `watchPositionAsync` (menos fiável com a app em background). Com modo background ativo, o `watchPosition` deixa de correr em paralelo para reduzir duplicados e consumo.
+
+### Diagnóstico (device físico)
+
+- **iOS**: sessão em `SecureStore` com `AFTER_FIRST_UNLOCK` — com telemóvel **bloqueado**, o token pode estar indisponível e o POST falha com “no active backend session”; ao desbloquear deve voltar a enviar. Com `EXPO_PUBLIC_LOG_LEVEL=debug` vê-se no log quando a task de background corre (`Tarefa de localização em background invocada`).
+- **Android**: confirmar permissão “localização o tempo todo”, serviço em primeiro plano visível e que a otimização de bateria não mate a app.
+- **Permissões**: se o estado na conta for só `foreground_only`, o utilizador ainda não concedeu localização em segundo plano.
+
 ## Validação recomendada
 
 Antes de publicar ou distribuir build interna, rode:

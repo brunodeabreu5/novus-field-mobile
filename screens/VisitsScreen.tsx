@@ -11,6 +11,8 @@ import {
   Image,
   TextInput,
 } from "react-native";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
@@ -45,12 +47,13 @@ import { mobileQueryKeys } from "../hooks/data/query-keys";
 import BottomSheetModal from "../components/BottomSheetModal";
 import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
+import { visitSchema, type VisitFormData } from "../lib/schemas";
 import { colors } from "../theme/colors";
 import { spacing, fontSize, radius } from "../theme/spacing";
 const s = spacing; const f = fontSize; const r = radius;
 
 const getDefaultVisitType = (types: VisitTypeOption[]) =>
-  types.find((item) => item.is_default)?.name || types[0]?.name || "Comercial";
+  types.find((item) => item.is_default)?.name || types[0]?.name || "";
 
 const EMPTY_VISITS: VisitRecord[] = [];
 
@@ -302,14 +305,30 @@ export default function VisitsScreen() {
   const [pendingSyncVisitIds, setPendingSyncVisitIds] = useState<Record<string, boolean>>({});
   const [pendingCheckoutVisitIds, setPendingCheckoutVisitIds] = useState<Record<string, boolean>>({});
   const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    clientId: "",
-    clientName: "",
-    notes: "",
-    visitType: "Comercial",
-  });
   const [draftAttachments, setDraftAttachments] = useState<DraftVisitAttachment[]>([]);
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const {
+    control,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors, isValid },
+  } = useForm<VisitFormData>({
+    resolver: zodResolver(visitSchema),
+    defaultValues: {
+      clientId: "",
+      clientName: "",
+      notes: "",
+      visitType: "",
+    },
+    mode: "onChange",
+  });
+
+  const formClientId = watch("clientId");
+  const formClientName = watch("clientName");
+  const formVisitType = watch("visitType");
+  const formNotes = watch("notes");
 
   const visitsQuery = useVisitsData(user?.id, period);
   const visits = visitsQuery.data ?? EMPTY_VISITS;
@@ -345,7 +364,7 @@ export default function VisitsScreen() {
 
   const openModal = () => {
     const defaultVisitType = getDefaultVisitType(visitTypes);
-    setForm({
+    reset({
       clientId: "",
       clientName: "",
       notes: "",
@@ -356,7 +375,6 @@ export default function VisitsScreen() {
     setDraftAttachments([]);
     setSelectedVisitForAttachment(null);
     setActivePicker(null);
-    setTouched({});
     setModalVisible(true);
   };
 
@@ -367,30 +385,7 @@ export default function VisitsScreen() {
     }
 
     setModalVisible(false);
-    setTouched({});
   };
-
-  const markTouched = (field: string) => {
-    setTouched((current) => ({ ...current, [field]: true }));
-  };
-
-  const fieldErrors = useMemo(() => {
-    const errors: Record<string, string> = {};
-    const resolvedClientName = normalizeClientName(form.clientName);
-    const resolvedVisitType = normalizeVisitType(form.visitType);
-
-    if (!resolvedClientName) {
-      errors.clientName = useManualClientEntry
-        ? "Ingrese el nombre del cliente."
-        : "Seleccione un cliente.";
-    }
-
-    if (!resolvedVisitType) {
-      errors.visitType = "Seleccione un tipo de visita.";
-    }
-
-    return errors;
-  }, [form.clientName, form.visitType, useManualClientEntry]);
 
   const getModalTitle = () => {
     if (activePicker === "client") {
@@ -411,14 +406,10 @@ export default function VisitsScreen() {
           clients={filteredClients}
           clientSearch={clientSearch}
           onClientSearchChange={setClientSearch}
-          selectedClientId={form.clientId}
+          selectedClientId={formClientId}
           onSelectClient={(client) => {
-            setForm((current) => ({
-              ...current,
-              clientId: client.id,
-              clientName: client.name,
-            }));
-            markTouched("clientName");
+            setValue("clientId", client.id, { shouldValidate: true });
+            setValue("clientName", client.name, { shouldValidate: true });
             setActivePicker(null);
           }}
           onBack={() => setActivePicker(null)}
@@ -432,10 +423,9 @@ export default function VisitsScreen() {
       return (
         <VisitTypePickerContent
           visitTypes={visitTypes}
-          selectedVisitType={form.visitType}
+          selectedVisitType={formVisitType}
           onSelectVisitType={(visitType) => {
-            setForm((current) => ({ ...current, visitType }));
-            markTouched("visitType");
+            setValue("visitType", visitType, { shouldValidate: true });
             setActivePicker(null);
           }}
           onBack={() => setActivePicker(null)}
@@ -470,8 +460,7 @@ export default function VisitsScreen() {
             ]}
             onPress={() => {
               setUseManualClientEntry(true);
-              markTouched("clientName");
-              setForm((current) => ({ ...current, clientId: "" }));
+              setValue("clientId", "", { shouldValidate: true });
             }}
           >
             <Text
@@ -485,89 +474,106 @@ export default function VisitsScreen() {
           </TouchableOpacity>
         </View>
 
-        {useManualClientEntry ? (
-          <FormField
-            label="Cliente"
-            placeholder="Nombre del cliente"
-            value={form.clientName}
-            onChangeText={(text) =>
-              setForm((current) => ({ ...current, clientName: text, clientId: "" }))
-            }
-            onBlur={() => {
-              markTouched("clientName");
-              setForm((current) => ({
-                ...current,
-                clientName: normalizeClientName(current.clientName),
-              }));
-            }}
-            error={touched.clientName ? fieldErrors.clientName : null}
-            helpText={!touched.clientName ? "Use esta opcion si el cliente aun no esta registrado." : null}
-          />
-        ) : (
-          <>
-            <Text style={styles.label}>Cliente</Text>
-            <TouchableOpacity
-              style={[styles.selector, touched.clientName && fieldErrors.clientName ? styles.selectorError : null]}
-              onPress={() => {
-                markTouched("clientName");
-                setActivePicker("client");
-              }}
-            >
-              <Text
-                style={[
-                  styles.selectorText,
-                  !form.clientName && styles.selectorPlaceholder,
-                ]}
+        <Controller
+          control={control}
+          name="clientName"
+          render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+            <>
+              {useManualClientEntry ? (
+                <FormField
+                  label="Cliente"
+                  placeholder="Nombre del cliente"
+                  value={value}
+                  onChangeText={(text) => {
+                    onChange(text);
+                    setValue("clientId", "", { shouldValidate: false });
+                  }}
+                  onBlur={() => {
+                    onBlur();
+                    onChange(normalizeClientName(value));
+                  }}
+                  error={error?.message ?? null}
+                  helpText="Use esta opcion si el cliente aun no esta registrado."
+                />
+              ) : (
+                <>
+                  <Text style={styles.label}>Cliente</Text>
+                  <TouchableOpacity
+                    style={[styles.selector, error ? styles.selectorError : null]}
+                    onPress={() => {
+                      setActivePicker("client");
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.selectorText,
+                        !value && styles.selectorPlaceholder,
+                      ]}
+                    >
+                      {value || "Seleccione un cliente"}
+                    </Text>
+                  </TouchableOpacity>
+                  {error ? (
+                    <Text style={styles.errorText}>{error.message}</Text>
+                  ) : (
+                    <Text style={styles.helpText}>Seleccione un cliente registrado o cambie a cliente no cadastrado.</Text>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="visitType"
+          render={({ field: { value }, fieldState: { error } }) => (
+            <>
+              <Text style={styles.label}>Tipo</Text>
+              <TouchableOpacity
+                style={[styles.selector, error ? styles.selectorError : null]}
+                onPress={() => {
+                  setActivePicker("type");
+                }}
+                disabled={isLoadingVisitTypes}
               >
-                {form.clientName || "Seleccione un cliente"}
-              </Text>
-            </TouchableOpacity>
-            {touched.clientName && fieldErrors.clientName ? (
-              <Text style={styles.errorText}>{fieldErrors.clientName}</Text>
-            ) : (
-              <Text style={styles.helpText}>Seleccione un cliente registrado o cambie a cliente no cadastrado.</Text>
-            )}
-          </>
-        )}
+                <Text
+                  style={[
+                    styles.selectorText,
+                    !value && styles.selectorPlaceholder,
+                  ]}
+                >
+                  {isLoadingVisitTypes
+                    ? "Cargando tipos..."
+                    : value || "Seleccione un tipo"}
+                </Text>
+              </TouchableOpacity>
+              {error ? (
+                <Text style={styles.errorText}>{error.message}</Text>
+              ) : (
+                <Text style={styles.helpText}>Defina el tipo para clasificar mejor la visita.</Text>
+              )}
+            </>
+          )}
+        />
 
-        <Text style={styles.label}>Tipo</Text>
-        <TouchableOpacity
-          style={[styles.selector, touched.visitType && fieldErrors.visitType ? styles.selectorError : null]}
-          onPress={() => {
-            markTouched("visitType");
-            setActivePicker("type");
-          }}
-          disabled={isLoadingVisitTypes}
-        >
-          <Text
-            style={[
-              styles.selectorText,
-              !form.visitType && styles.selectorPlaceholder,
-            ]}
-          >
-            {isLoadingVisitTypes
-              ? "Cargando tipos..."
-              : form.visitType || "Seleccione un tipo"}
-          </Text>
-        </TouchableOpacity>
-        {touched.visitType && fieldErrors.visitType ? (
-          <Text style={styles.errorText}>{fieldErrors.visitType}</Text>
-        ) : (
-          <Text style={styles.helpText}>Defina el tipo para clasificar mejor la visita.</Text>
-        )}
-
-        <FormField
-          label="Notas (opcional)"
-          placeholder="Notas..."
-          value={form.notes}
-          onChangeText={(text) =>
-            setForm((current) => ({ ...current, notes: text }))
-          }
-          onBlur={() =>
-            setForm((current) => ({ ...current, notes: normalizeNotes(current.notes) }))
-          }
-          multiline
-          helpText="Puede dejar contexto breve para seguimiento comercial." 
+        <Controller
+          control={control}
+          name="notes"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <FormField
+              label="Notas (opcional)"
+              placeholder="Notas..."
+              value={value}
+              onChangeText={onChange}
+              onBlur={() => {
+                onBlur();
+                onChange(normalizeNotes(value));
+              }}
+              multiline
+              helpText="Puede dejar contexto breve para seguimiento comercial."
+            />
+          )}
         />
 
         <View style={styles.attachmentButtonsRow}>
@@ -609,7 +615,7 @@ export default function VisitsScreen() {
           isLoading={createVisitMutation.isPending}
           submitLabel="Crear Visita"
           onCancel={handleModalRequestClose}
-          onSubmit={handleCreateVisit}
+          onSubmit={handleSubmit(handleCreateVisit)}
         />
       </>
     );
@@ -851,33 +857,22 @@ export default function VisitsScreen() {
     setSelectedVisitForAttachment(null);
   };
 
-  const handleCreateVisit = async () => {
+  const handleCreateVisit = async (data: VisitFormData) => {
     if (!user || !profile) {
       Alert.alert("Error", "Sesión inválida.");
       return;
     }
 
-    const resolvedClientName = normalizeClientName(form.clientName);
-    if (!resolvedClientName) {
-      markTouched("clientName");
-      Alert.alert("Error", "Seleccione o ingrese un cliente.");
-      return;
-    }
-
-    const resolvedVisitType = normalizeVisitType(form.visitType);
-    if (!resolvedVisitType) {
-      markTouched("visitType");
-      Alert.alert("Error", "Seleccione un tipo de visita");
-      return;
-    }
+    const resolvedClientName = normalizeClientName(data.clientName);
+    const resolvedVisitType = normalizeVisitType(data.visitType);
 
     try {
       const result = await createVisitMutation.mutateAsync({
         userId: user.id,
         vendorName: profile.full_name || user.email || "Vendedor",
-        clientId: form.clientId || null,
+        clientId: data.clientId || null,
         clientName: resolvedClientName,
-        notes: normalizeNotes(form.notes),
+        notes: normalizeNotes(data.notes),
         visitType: resolvedVisitType,
       });
 
@@ -898,7 +893,7 @@ export default function VisitsScreen() {
         }
         setModalVisible(false);
         setDraftAttachments([]);
-        setTouched({});
+        reset();
         return;
       }
 
@@ -914,7 +909,7 @@ export default function VisitsScreen() {
 
       setModalVisible(false);
       setDraftAttachments([]);
-      setTouched({});
+      reset();
       await refreshVisitData();
     } catch (error) {
       Alert.alert(

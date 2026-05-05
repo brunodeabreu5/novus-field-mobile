@@ -59,6 +59,9 @@ export interface AuthSnapshot {
 }
 
 const AUTH_STORAGE_KEY = "backend_auth_session";
+const SECURE_STORE_OPTIONS = {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+} satisfies SecureStore.SecureStoreOptions;
 const listeners = new Set<(snapshot: AuthSnapshot) => void>();
 
 let authStateMemory: StoredAuthState | null = null;
@@ -66,21 +69,19 @@ let authStateMemoryReady = false;
 
 async function readAuthStorage(): Promise<string | null> {
   try {
-    const secureValue = await SecureStore.getItemAsync(AUTH_STORAGE_KEY);
+    const secureValue = await SecureStore.getItemAsync(
+      AUTH_STORAGE_KEY,
+      SECURE_STORE_OPTIONS,
+    );
     if (secureValue) {
       return secureValue;
     }
   } catch {}
 
-  const legacyValue = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
-  if (legacyValue) {
-    try {
-      await SecureStore.setItemAsync(AUTH_STORAGE_KEY, legacyValue);
-      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
-    } catch {
-      return legacyValue;
-    }
-    return legacyValue;
+  // Fallback para AsyncStorage (útil em background quando SecureStore pode estar indisponível)
+  const fallbackValue = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+  if (fallbackValue) {
+    return fallbackValue;
   }
 
   return null;
@@ -89,18 +90,19 @@ async function readAuthStorage(): Promise<string | null> {
 async function writeAuthStorage(value: string | null) {
   if (value === null) {
     try {
-      await SecureStore.deleteItemAsync(AUTH_STORAGE_KEY);
+      await SecureStore.deleteItemAsync(AUTH_STORAGE_KEY, SECURE_STORE_OPTIONS);
     } catch {}
     await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
     return;
   }
 
+  // Salva em ambos: SecureStore (seguro) + AsyncStorage (fallback para background)
   try {
-    await SecureStore.setItemAsync(AUTH_STORAGE_KEY, value);
-    await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+    await SecureStore.setItemAsync(AUTH_STORAGE_KEY, value, SECURE_STORE_OPTIONS);
   } catch {
-    await AsyncStorage.setItem(AUTH_STORAGE_KEY, value);
+    // SecureStore falhou, mas ainda salvamos no AsyncStorage abaixo
   }
+  await AsyncStorage.setItem(AUTH_STORAGE_KEY, value);
 }
 
 /** Call if `backend_auth_session` is removed outside this module (e.g. legacy cleanup). */
@@ -241,6 +243,26 @@ export async function getAccessToken(): Promise<string | null> {
   return (await readStoredState())?.accessToken ?? null;
 }
 
+export async function refreshStoredAuthSession(): Promise<string | null> {
+  const current = await readStoredState();
+  if (!current) {
+    return null;
+  }
+
+  try {
+    const refreshed = await request<BackendAuthResponse>("/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken: current.refreshToken }),
+    });
+    const snapshot = await storeAuthResponse(refreshed);
+    return snapshot.session?.access_token ?? null;
+  } catch {
+    await writeStoredState(null);
+    emit(null);
+    return null;
+  }
+}
+
 export async function getCurrentUserId(): Promise<string | null> {
   return (await readStoredState())?.user.id ?? null;
 }
@@ -259,11 +281,8 @@ export async function initializeAuth(): Promise<AuthSnapshot> {
     return toSnapshot(nextState);
   } catch {
     try {
-      const refreshed = await request<BackendAuthResponse>("/auth/refresh", {
-        method: "POST",
-        body: JSON.stringify({ refreshToken: current.refreshToken }),
-      });
-      return storeAuthResponse(refreshed);
+      await refreshStoredAuthSession();
+      return toSnapshot(await readStoredState());
     } catch {
       await writeStoredState(null);
       emit(null);

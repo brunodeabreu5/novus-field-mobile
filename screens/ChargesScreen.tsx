@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from "react";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import {
   View,
   Text,
@@ -27,6 +29,7 @@ import {
 } from "../hooks/use-mobile-data";
 import type { ChargeRecord, Client } from "../lib/mobile-data";
 import type { ThemeColors } from "../theme/colors";
+import { chargeSchema, type ChargeFormData } from "../lib/schemas";
 
 const STATUS_LABELS: Record<string, string> = {
   pendiente: "Pendiente",
@@ -121,14 +124,26 @@ export default function ChargesScreen() {
   const [activePicker, setActivePicker] = useState<"client" | null>(null);
   const [search, setSearch] = useState("");
   const [editingCharge, setEditingCharge] = useState<ChargeRecord | null>(null);
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [form, setForm] = useState({
-    clientId: "",
-    clientName: "",
-    amount: "",
-    dueDate: "",
-    notes: "",
+
+  const {
+    control,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useForm<ChargeFormData>({
+    resolver: zodResolver(chargeSchema),
+    defaultValues: {
+      clientId: "",
+      clientName: "",
+      amount: "",
+      dueDate: "",
+      notes: "",
+    },
   });
+
+  const clientName = watch("clientName");
 
   const filtered = useMemo(() => {
     const searchTerm = search.toLowerCase().trim();
@@ -149,8 +164,7 @@ export default function ChargesScreen() {
 
   const openModal = () => {
     setEditingCharge(null);
-    setTouched({});
-    setForm({
+    reset({
       clientId: "",
       clientName: "",
       amount: "",
@@ -163,8 +177,7 @@ export default function ChargesScreen() {
 
   const openEditModal = (charge: ChargeRecord) => {
     setEditingCharge(charge);
-    setTouched({});
-    setForm({
+    reset({
       clientId: charge.client_id || "",
       clientName: charge.client_name,
       amount: String(charge.amount || ""),
@@ -176,11 +189,8 @@ export default function ChargesScreen() {
   };
 
   const handleSelectClient = (client: Client) => {
-    setForm((current) => ({
-      ...current,
-      clientId: client.id,
-      clientName: client.name,
-    }));
+    setValue("clientId", client.id);
+    setValue("clientName", client.name);
     setActivePicker(null);
   };
 
@@ -192,100 +202,29 @@ export default function ChargesScreen() {
 
     setModalVisible(false);
     setEditingCharge(null);
-    setTouched({});
   };
-
-  const markTouched = (field: string) => {
-    setTouched((current) => ({ ...current, [field]: true }));
-  };
-
-  const fieldErrors = useMemo(() => {
-    const errors: Record<string, string> = {};
-    const normalizedClientName = normalizeClientName(form.clientName);
-    const amount = Number.parseInt(normalizeAmountInput(form.amount), 10);
-    const normalizedDueDate = normalizeDueDate(form.dueDate);
-
-    if (!normalizedClientName) {
-      errors.clientName = "El cliente es obligatorio.";
-    }
-
-    if (!form.amount.trim()) {
-      errors.amount = "Ingrese un monto.";
-    } else if (Number.isNaN(amount) || amount <= 0) {
-      errors.amount = "Ingrese un monto valido.";
-    }
-
-    if (normalizedDueDate) {
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!dateRegex.test(normalizedDueDate)) {
-        errors.dueDate = "Use el formato YYYY-MM-DD.";
-      } else {
-        const dueDate = new Date(normalizedDueDate);
-        if (Number.isNaN(dueDate.getTime())) {
-          errors.dueDate = "La fecha no es valida.";
-        } else if (dueDate < startOfDay(new Date())) {
-          errors.dueDate = "La fecha no puede ser anterior a hoy.";
-        }
-      }
-    }
-
-    return errors;
-  }, [form.amount, form.clientName, form.dueDate]);
 
   const modalTitle = activePicker === "client" ? "Seleccionar Cliente" : editingCharge ? "Editar Cobro" : "Nuevo Cobro";
 
-  const saveCharge = async () => {
-    const normalizedClientName = normalizeClientName(form.clientName);
-    const normalizedAmount = normalizeAmountInput(form.amount);
-    const normalizedDueDate = normalizeDueDate(form.dueDate);
-    const normalizedNotes = normalizeNotes(form.notes);
-
-    if (!user || !profile || !normalizedClientName) {
-      markTouched("clientName");
-      Alert.alert("Error", "El cliente es obligatorio");
+  const saveCharge = handleSubmit(async (data) => {
+    if (!user || !profile) {
+      Alert.alert("Error", "Usuario no autenticado");
       return;
     }
+
+    const normalizedClientName = normalizeClientName(data.clientName);
+    const normalizedAmount = normalizeAmountInput(data.amount);
+    const normalizedDueDate = normalizeDueDate(data.dueDate);
+    const normalizedNotes = normalizeNotes(data.notes);
 
     const amount = Number.parseInt(normalizedAmount, 10);
-    if (Number.isNaN(amount) || amount <= 0) {
-      markTouched("amount");
-      Alert.alert("Error", "Ingrese un monto valido");
-      return;
-    }
-
-    if (normalizedDueDate) {
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!dateRegex.test(normalizedDueDate)) {
-        markTouched("dueDate");
-        Alert.alert(
-          "Error",
-          "El formato de fecha debe ser exactamente YYYY-MM-DD"
-        );
-        return;
-      }
-      const dueDate = new Date(normalizedDueDate);
-      if (Number.isNaN(dueDate.getTime())) {
-        markTouched("dueDate");
-        Alert.alert("Error", "La fecha ingresada no es válida en el calendario");
-        return;
-      }
-      const today = startOfDay(new Date());
-      if (dueDate < today) {
-        markTouched("dueDate");
-        Alert.alert(
-          "Error",
-          "La fecha de vencimiento no puede ser anterior a hoy"
-        );
-        return;
-      }
-    }
 
     try {
       if (editingCharge) {
         await updateChargeMutation.mutateAsync({
           userId: user.id,
           chargeId: editingCharge.id,
-          clientId: form.clientId,
+          clientId: data.clientId,
           clientName: normalizedClientName,
           amount,
           dueDate: normalizedDueDate,
@@ -295,7 +234,7 @@ export default function ChargesScreen() {
         await createChargeMutation.mutateAsync({
           userId: user.id,
           vendorName: profile.full_name || user.email || "Vendedor",
-          clientId: form.clientId,
+          clientId: data.clientId,
           clientName: normalizedClientName,
           amount,
           dueDate: normalizedDueDate,
@@ -304,14 +243,14 @@ export default function ChargesScreen() {
       }
       setModalVisible(false);
       setEditingCharge(null);
-      setTouched({});
+      reset();
     } catch (error) {
       Alert.alert(
         "Error",
-        error instanceof Error ? error.message : "No se pudo crear el cobro"
+        error instanceof Error ? error.message : "No se pudo guardar el cobro"
       );
     }
-  };
+  });
 
   const handleUpdateStatus = (charge: ChargeRecord) => {
     if (!user) {
@@ -424,63 +363,73 @@ export default function ChargesScreen() {
           <ScrollView>
             <Text style={styles.label}>Cliente *</Text>
             <TouchableOpacity
-              style={[styles.input, touched.clientName && fieldErrors.clientName ? styles.inputError : null]}
+              style={[styles.input, errors.clientName ? styles.inputError : null]}
               onPress={() => setActivePicker("client")}
             >
               <Text
-                style={form.clientName ? styles.inputText : styles.placeholderText}
+                style={clientName ? styles.inputText : styles.placeholderText}
               >
-                {form.clientName || "Seleccione un cliente"}
+                {clientName || "Seleccione un cliente"}
               </Text>
             </TouchableOpacity>
-            {touched.clientName && fieldErrors.clientName ? (
-              <Text style={styles.errorText}>{fieldErrors.clientName}</Text>
+            {errors.clientName ? (
+              <Text style={styles.errorText}>{errors.clientName.message}</Text>
             ) : (
               <Text style={styles.helpText}>Seleccione un cliente existente para asociar el cobro.</Text>
             )}
-            <FormField
-              label="Monto (Gs.)"
-              placeholder="Ej: 150000"
-              value={form.amount}
-              onChangeText={(text) =>
-                setForm((current) => ({
-                  ...current,
-                  amount: normalizeAmountInput(text),
-                }))
-              }
-              keyboardType="number-pad"
-              onBlur={() => {
-                markTouched("amount");
-                setForm((current) => ({ ...current, amount: normalizeAmountInput(current.amount) }));
-              }}
-              error={touched.amount ? fieldErrors.amount : null}
-              helpText={!touched.amount ? "Solo numeros, sin puntos ni comas." : null}
+            <Controller
+              control={control}
+              name="amount"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <FormField
+                  label="Monto (Gs.)"
+                  placeholder="Ej: 150000"
+                  value={value}
+                  onChangeText={(text) => onChange(normalizeAmountInput(text))}
+                  keyboardType="number-pad"
+                  onBlur={() => {
+                    onBlur();
+                    onChange(normalizeAmountInput(value));
+                  }}
+                  error={errors.amount?.message}
+                  helpText="Solo numeros, sin puntos ni comas."
+                />
+              )}
             />
-            <FormField
-              label="Fecha de vencimiento (opcional)"
-              placeholder="YYYY-MM-DD"
-              value={form.dueDate}
-              onChangeText={(text) =>
-                setForm((current) => ({ ...current, dueDate: text }))
-              }
-              onBlur={() => {
-                markTouched("dueDate");
-                setForm((current) => ({ ...current, dueDate: normalizeDueDate(current.dueDate) }));
-              }}
-              error={touched.dueDate ? fieldErrors.dueDate : null}
-              helpText={!touched.dueDate ? "Ejemplo: 2026-12-31" : null}
+            <Controller
+              control={control}
+              name="dueDate"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <FormField
+                  label="Fecha de vencimiento (opcional)"
+                  placeholder="YYYY-MM-DD"
+                  value={value}
+                  onChangeText={onChange}
+                  onBlur={() => {
+                    onBlur();
+                    onChange(normalizeDueDate(value));
+                  }}
+                  error={errors.dueDate?.message}
+                  helpText="Ejemplo: 2026-12-31"
+                />
+              )}
             />
-            <FormField
-              label="Notas"
-              placeholder="Notas..."
-              value={form.notes}
-              onChangeText={(text) =>
-                setForm((current) => ({ ...current, notes: text }))
-              }
-              onBlur={() =>
-                setForm((current) => ({ ...current, notes: normalizeNotes(current.notes) }))
-              }
-              multiline
+            <Controller
+              control={control}
+              name="notes"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <FormField
+                  label="Notas"
+                  placeholder="Notas..."
+                  value={value}
+                  onChangeText={onChange}
+                  onBlur={() => {
+                    onBlur();
+                    onChange(normalizeNotes(value));
+                  }}
+                  multiline
+                />
+              )}
             />
             <FormActions
               isLoading={createChargeMutation.isPending || updateChargeMutation.isPending}
@@ -488,7 +437,7 @@ export default function ChargesScreen() {
               onCancel={() => {
                 setModalVisible(false);
                 setEditingCharge(null);
-                setTouched({});
+                reset();
               }}
               onSubmit={saveCharge}
             />

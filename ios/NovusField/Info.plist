@@ -57,7 +57,7 @@
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>NovusField necesita acceso continuo a la ubicacion para registrar recorridos y visitas en segundo plano.</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>NovusField necesita acceso continuo a la ubicacion para registrar recorridos y visitas en segundo plano.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>NovusField necesita su ubicacion para registrar visitas y tracking en campo.</string>
     <key>NSMicrophoneUsageDescription</key>

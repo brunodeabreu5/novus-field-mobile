@@ -9,6 +9,8 @@ import {
   TextInput,
   Alert,
 } from "react-native";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Camera,
   type CameraRef,
@@ -31,6 +33,7 @@ import MapPin from "../components/MapPin";
 import { getRuntimeConfigWarnings } from "../lib/config";
 import { geocodeAddress } from "../lib/geocoding";
 import { getMapTokenWarning, getMapboxMapStyle } from "../lib/mapbox-tiles";
+import { clientSchema, type ClientFormData } from "../lib/schemas";
 import { colors } from "../theme/colors";
 
 const isValidEmail = (email: string): boolean => {
@@ -145,9 +148,23 @@ export default function ClientsScreen() {
   const [search, setSearch] = useState("");
   const [gpsLoading, setGpsLoading] = useState(false);
   const [addressSearching, setAddressSearching] = useState(false);
-  const [form, setForm] = useState(emptyForm);
   const [pickerViewport, setPickerViewport] = useState<PickerViewport>(DEFAULT_VIEWPORT);
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const {
+    control,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useForm<ClientFormData>({
+    resolver: zodResolver(clientSchema),
+    defaultValues: emptyForm,
+  });
+
+  const formLatitude = watch("latitude");
+  const formLongitude = watch("longitude");
+  const formAddress = watch("address");
 
   const mapboxMapStyle = useMemo(() => getMapboxMapStyle(), []);
   const mapWarnings = useMemo(() => {
@@ -174,82 +191,37 @@ export default function ClientsScreen() {
 
   const openModal = () => {
     setEditingClient(null);
-    setForm(emptyForm);
+    reset(emptyForm);
     setPickerViewport(DEFAULT_VIEWPORT);
-    setTouched({});
     setModalVisible(true);
   };
 
   const openEditModal = (client: Client) => {
     setEditingClient(client);
-    setForm(buildClientForm(client));
+    reset(buildClientForm(client));
     setPickerViewport(buildViewportFromClient(client));
-    setTouched({});
     setModalVisible(true);
   };
 
   const closeModal = () => {
     setModalVisible(false);
     setEditingClient(null);
-    setForm(emptyForm);
+    reset(emptyForm);
     setPickerViewport(DEFAULT_VIEWPORT);
-    setTouched({});
   };
 
-  const markTouched = (field: string) => {
-    setTouched((current) => ({ ...current, [field]: true }));
-  };
-
-  const fieldErrors = useMemo(() => {
-    const errors: Record<string, string> = {};
-    const normalizedName = normalizeName(form.name);
-    const normalizedAddress = normalizeAddress(form.address);
-    const normalizedEmail = normalizeEmail(form.email);
-    const normalizedPhone = normalizePhone(form.phone);
-    const latitude = form.latitude.trim() ? Number.parseFloat(form.latitude.trim()) : null;
-    const longitude = form.longitude.trim() ? Number.parseFloat(form.longitude.trim()) : null;
-
-    if (!normalizedName) {
-      errors.name = "El nombre es obligatorio.";
-    }
-
-    if (normalizedEmail && !isValidEmail(normalizedEmail)) {
-      errors.email = "Ingrese un email valido.";
-    }
-
-    if (normalizedPhone && !isValidPhone(normalizedPhone)) {
-      errors.phone = "Ingrese un telefono valido.";
-    }
-
-    if (normalizedAddress && normalizedAddress.length < 3) {
-      errors.address = "Ingrese una direccion mas completa.";
-    }
-
-    if ((latitude === null) !== (longitude === null)) {
-      errors.location = "Latitud y longitud deben completarse juntas.";
-    } else if (
-      latitude !== null &&
-      (Number.isNaN(latitude) || longitude === null || Number.isNaN(longitude))
-    ) {
-      errors.location = "Las coordenadas no son validas.";
-    }
-
-    return errors;
-  }, [form.address, form.email, form.latitude, form.longitude, form.name, form.phone]);
-
-  const hasLocation = !!(form.latitude && form.longitude);
+  const hasLocation = !!(formLatitude && formLongitude);
 
   const updateLocation = (
     latitude: number,
     longitude: number,
     nextAddress?: string
   ) => {
-    setForm((current) => ({
-      ...current,
-      address: nextAddress ?? current.address,
-      latitude: latitude.toFixed(6),
-      longitude: longitude.toFixed(6),
-    }));
+    if (nextAddress) {
+      setValue("address", nextAddress);
+    }
+    setValue("latitude", latitude.toFixed(6));
+    setValue("longitude", longitude.toFixed(6));
     setPickerViewport((current) => ({
       latitude,
       longitude,
@@ -262,9 +234,12 @@ export default function ClientsScreen() {
       return;
     }
 
-    if (form.latitude.trim() && form.longitude.trim()) {
-      const latitude = Number.parseFloat(form.latitude);
-      const longitude = Number.parseFloat(form.longitude);
+    const lat = watch("latitude");
+    const lng = watch("longitude");
+
+    if (lat.trim() && lng.trim()) {
+      const latitude = Number.parseFloat(lat);
+      const longitude = Number.parseFloat(lng);
       if (!Number.isNaN(latitude) && !Number.isNaN(longitude)) {
         setPickerViewport((current) => ({
           latitude,
@@ -363,10 +338,9 @@ export default function ClientsScreen() {
   };
 
   const handleAddressSearch = async () => {
-    const normalizedAddress = normalizeAddress(form.address);
+    const normalizedAddress = normalizeAddress(formAddress);
 
     if (!normalizedAddress || normalizedAddress.length < 3) {
-      markTouched("address");
       Alert.alert(
         "Direccion requerida",
         "Ingrese una direccion mas completa para buscar coordenadas."
@@ -399,41 +373,27 @@ export default function ClientsScreen() {
     }
   };
 
-  const handleSaveClient = async () => {
-    const normalizedName = normalizeName(form.name);
-    const normalizedDocument = normalizeDocument(form.document);
-    const normalizedPhone = normalizePhone(form.phone);
-    const normalizedEmail = normalizeEmail(form.email);
-    const normalizedAddress = normalizeAddress(form.address);
-    const normalizedNotes = form.notes.trim();
-
-    if (!user || !normalizedName) {
-      markTouched("name");
-      Alert.alert("Error", "El nombre es obligatorio");
+  const handleSaveClient = handleSubmit(async (data) => {
+    if (!user) {
+      Alert.alert("Error", "Usuario no autenticado");
       return;
     }
 
-    if (!isValidEmail(normalizedEmail)) {
-      markTouched("email");
-      Alert.alert("Error", "Formato de email invalido");
-      return;
-    }
+    const normalizedName = normalizeName(data.name);
+    const normalizedDocument = normalizeDocument(data.document);
+    const normalizedPhone = normalizePhone(data.phone);
+    const normalizedEmail = normalizeEmail(data.email);
+    const normalizedAddress = normalizeAddress(data.address);
+    const normalizedNotes = data.notes.trim();
 
-    if (!isValidPhone(normalizedPhone)) {
-      markTouched("phone");
-      Alert.alert("Error", "Formato de telefono invalido");
-      return;
-    }
-
-    const latitude = form.latitude.trim()
-      ? Number.parseFloat(form.latitude.trim())
+    const latitude = data.latitude.trim()
+      ? Number.parseFloat(data.latitude.trim())
       : null;
-    const longitude = form.longitude.trim()
-      ? Number.parseFloat(form.longitude.trim())
+    const longitude = data.longitude.trim()
+      ? Number.parseFloat(data.longitude.trim())
       : null;
 
     if ((latitude === null) !== (longitude === null)) {
-      markTouched("location");
       Alert.alert(
         "Ubicacion incompleta",
         "Latitude y longitude deben estar completas o vacias."
@@ -445,7 +405,6 @@ export default function ClientsScreen() {
       latitude !== null &&
       (Number.isNaN(latitude) || longitude === null || Number.isNaN(longitude))
     ) {
-      markTouched("location");
       Alert.alert("Error", "Las coordenadas del cliente no son validas.");
       return;
     }
@@ -484,7 +443,7 @@ export default function ClientsScreen() {
         error instanceof Error ? error.message : "No se pudo guardar el cliente"
       );
     }
-  };
+  });
 
   const handleMarkerDragEnd = (feature: GeoJSON.Feature) => {
     const coordinate = extractCoordinateFromFeature(feature);
@@ -505,8 +464,8 @@ export default function ClientsScreen() {
   };
 
   const selectedCoordinate =
-    form.latitude.trim() && form.longitude.trim()
-      ? ([Number.parseFloat(form.longitude), Number.parseFloat(form.latitude)] as [
+    formLatitude.trim() && formLongitude.trim()
+      ? ([Number.parseFloat(formLongitude), Number.parseFloat(formLatitude)] as [
           number,
           number,
         ])
@@ -563,67 +522,94 @@ export default function ClientsScreen() {
         onRequestClose={closeModal}
         contentStyle={styles.modal}
       >
-        <FormField
-          label="Nombre *"
-          placeholder="Nombre del cliente"
-          value={form.name}
-          onChangeText={(text) => setForm((current) => ({ ...current, name: text }))}
-          onBlur={() => {
-            markTouched("name");
-            setForm((current) => ({ ...current, name: normalizeName(current.name) }));
-          }}
-          error={touched.name ? fieldErrors.name : null}
+        <Controller
+          control={control}
+          name="name"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <FormField
+              label="Nombre *"
+              placeholder="Nombre del cliente"
+              value={value}
+              onChangeText={onChange}
+              onBlur={() => {
+                onBlur();
+                onChange(normalizeName(value));
+              }}
+              error={errors.name?.message}
+            />
+          )}
         />
-        <FormField
-          label="RUC / DOC"
-          placeholder="Ingrese RUC o documento"
-          value={form.document}
-          onChangeText={(text) =>
-            setForm((current) => ({ ...current, document: text }))
-          }
-          onBlur={() =>
-            setForm((current) => ({ ...current, document: normalizeDocument(current.document) }))
-          }
+        <Controller
+          control={control}
+          name="document"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <FormField
+              label="RUC / DOC"
+              placeholder="Ingrese RUC o documento"
+              value={value}
+              onChangeText={onChange}
+              onBlur={() => {
+                onBlur();
+                onChange(normalizeDocument(value));
+              }}
+            />
+          )}
         />
-        <FormField
-          label="Telefono"
-          placeholder="Telefono"
-          value={form.phone}
-          onChangeText={(text) => setForm((current) => ({ ...current, phone: text }))}
-          keyboardType="phone-pad"
-          onBlur={() => {
-            markTouched("phone");
-            setForm((current) => ({ ...current, phone: normalizePhone(current.phone) }));
-          }}
-          error={touched.phone ? fieldErrors.phone : null}
-          helpText={!touched.phone ? "Puede dejarlo vacio si no lo tiene." : null}
+        <Controller
+          control={control}
+          name="phone"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <FormField
+              label="Telefono"
+              placeholder="Telefono"
+              value={value}
+              onChangeText={onChange}
+              keyboardType="phone-pad"
+              onBlur={() => {
+                onBlur();
+                onChange(normalizePhone(value));
+              }}
+              error={errors.phone?.message}
+              helpText="Puede dejarlo vacio si no lo tiene."
+            />
+          )}
         />
-        <FormField
-          label="Email"
-          placeholder="Email"
-          value={form.email}
-          onChangeText={(text) => setForm((current) => ({ ...current, email: text }))}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          onBlur={() => {
-            markTouched("email");
-            setForm((current) => ({ ...current, email: normalizeEmail(current.email) }));
-          }}
-          error={touched.email ? fieldErrors.email : null}
+        <Controller
+          control={control}
+          name="email"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <FormField
+              label="Email"
+              placeholder="Email"
+              value={value}
+              onChangeText={onChange}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              onBlur={() => {
+                onBlur();
+                onChange(normalizeEmail(value));
+              }}
+              error={errors.email?.message}
+            />
+          )}
         />
-        <FormField
-          label="Direccion"
-          placeholder="Direccion"
-          value={form.address}
-          onChangeText={(text) =>
-            setForm((current) => ({ ...current, address: text }))
-          }
-          onBlur={() => {
-            markTouched("address");
-            setForm((current) => ({ ...current, address: normalizeAddress(current.address) }));
-          }}
-          error={touched.address ? fieldErrors.address : null}
-          helpText={!hasLocation ? "Use GPS, el mapa o la busqueda por direccion para fijar la ubicacion." : null}
+        <Controller
+          control={control}
+          name="address"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <FormField
+              label="Direccion"
+              placeholder="Direccion"
+              value={value}
+              onChangeText={onChange}
+              onBlur={() => {
+                onBlur();
+                onChange(normalizeAddress(value));
+              }}
+              error={errors.address?.message}
+              helpText={!hasLocation ? "Use GPS, el mapa o la busqueda por direccion para fijar la ubicacion." : null}
+            />
+          )}
         />
 
         <View style={styles.locationActions}>
@@ -662,7 +648,7 @@ export default function ClientsScreen() {
           </View>
         ) : null}
 
-        {form.latitude && form.longitude ? (
+        {formLatitude && formLongitude ? (
           <View style={styles.mapWrapper}>
             <MapView
               style={styles.map}
@@ -697,13 +683,13 @@ export default function ClientsScreen() {
               Mueva el pin para ajustar la ubicacion exacta del cliente.
             </Text>
             <Text style={styles.coordinatesValue}>
-              Punto seleccionado: {form.latitude}, {form.longitude}
+              Punto seleccionado: {formLatitude}, {formLongitude}
             </Text>
             <TouchableOpacity
               style={styles.clearLocationButton}
               onPress={() => {
-                setForm((current) => ({ ...current, latitude: "", longitude: "" }));
-                markTouched("location");
+                setValue("latitude", "");
+                setValue("longitude", "");
               }}
             >
               <Text style={styles.clearLocationButtonText}>Limpiar ubicacion</Text>
@@ -745,17 +731,23 @@ export default function ClientsScreen() {
             </Text>
           </View>
         )}
-        {touched.location && fieldErrors.location ? (
-          <Text style={styles.locationErrorText}>{fieldErrors.location}</Text>
+        {errors.latitude || errors.longitude ? (
+          <Text style={styles.locationErrorText}>{errors.latitude?.message || errors.longitude?.message}</Text>
         ) : hasLocation ? (
           <Text style={styles.locationHintText}>Ubicacion lista para guardar.</Text>
         ) : null}
-        <FormField
-          label="Notas"
-          placeholder="Observaciones del cliente"
-          value={form.notes}
-          onChangeText={(text) => setForm((current) => ({ ...current, notes: text }))}
-          multiline
+        <Controller
+          control={control}
+          name="notes"
+          render={({ field: { onChange, value } }) => (
+            <FormField
+              label="Notas"
+              placeholder="Observaciones del cliente"
+              value={value}
+              onChangeText={onChange}
+              multiline
+            />
+          )}
         />
 
         <FormActions

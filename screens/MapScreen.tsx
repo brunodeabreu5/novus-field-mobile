@@ -27,6 +27,7 @@ import {
   useVendorPositionsSubscription,
   useVendorsData,
   useVendorRouteHistory,
+  useClientsData,
 } from "../hooks/use-mobile-data";
 import MapPin from "../components/MapPin";
 import { getRuntimeConfigWarnings } from "../lib/config";
@@ -63,10 +64,12 @@ export default function MapScreen() {
   const { data: positions = [], isLoading: isLoadingPositions } =
     useVendorPositions(isManagerOrAdmin);
   const { data: vendors = [] } = useVendorsData(isManagerOrAdmin);
+  const { data: clients = [] } = useClientsData();
   const {
     data: history,
     isLoading: isLoadingHistory,
   } = useVendorRouteHistory(selectedVendorId || undefined, historyDate || undefined);
+  const [showClients, setShowClients] = useState(true);
 
   useVendorPositionsSubscription(isManagerOrAdmin);
 
@@ -99,6 +102,17 @@ export default function MapScreen() {
       })),
     [latestByVendor, vendorNameById]
   );
+
+  const clientMarkers = useMemo(() => {
+    return clients
+      .filter((c) => c.latitude != null && c.longitude != null)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        lat: c.latitude!,
+        lng: c.longitude!,
+      }));
+  }, [clients]);
 
   const trail = history?.trail || [];
   const historyStats = history?.stats || null;
@@ -285,6 +299,19 @@ export default function MapScreen() {
               <MapPin color={colors.warning} label="R" size="sm" />
             </PointAnnotation>
           ) : null}
+
+          {showClients &&
+            clientMarkers.map((client) => (
+              <PointAnnotation
+                key={client.id}
+                id={`client-${client.id}`}
+                coordinate={[client.lng, client.lat]}
+                title={client.name}
+                snippet="Cliente"
+              >
+                <MapPin color={colors.info} label="C" size="sm" />
+              </PointAnnotation>
+            ))}
         </MapView>
         {configWarnings.length ? (
           <View style={styles.warningBox}>
@@ -296,6 +323,11 @@ export default function MapScreen() {
           <Text style={styles.legendText}>
             {liveMarkers.length} ubicaciones activas
           </Text>
+          <TouchableOpacity onPress={() => setShowClients((s) => !s)}>
+            <Text style={styles.legendToggle}>
+              {showClients ? "Ocultar clientes" : "Mostrar clientes"}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -481,10 +513,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   legendText: {
     fontSize: 14,
     color: colors.mutedForeground,
+  },
+  legendToggle: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: "600",
   },
   warningBox: {
     marginTop: 12,

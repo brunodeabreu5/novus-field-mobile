@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import * as Location from "expo-location";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { isExpectedAuthError } from "../lib/auth-errors";
 import { backendApi } from "../lib/backend-api";
 import { getExpoProjectId } from "../lib/config";
+import {
+  DEFAULT_LOCATION_MAX_AGE_MS,
+  DEFAULT_LOCATION_REQUIRED_ACCURACY_M,
+  getFreshCurrentPosition,
+  getFreshLastKnownPosition,
+} from "../lib/location-utils";
 import { logger } from "../lib/logger";
 import { configureAndroidNotificationChannel } from "../lib/mobile-notifications";
 import { isOfflineLikeError } from "../lib/sync";
@@ -113,23 +119,28 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       return false;
     }
 
-    try {
-      const lastKnown = await Location.getLastKnownPositionAsync({});
-      if (lastKnown) {
-        setLastLocation({
-          lat: lastKnown.coords.latitude,
-          lng: lastKnown.coords.longitude,
-        });
-        return true;
-      }
-    } catch {
-      // Ignore and fall through to a fresh location request.
+    const lastKnown = await getFreshLastKnownPosition({
+      maxAgeMs: DEFAULT_LOCATION_MAX_AGE_MS,
+      requiredAccuracyMeters: DEFAULT_LOCATION_REQUIRED_ACCURACY_M,
+    });
+    if (lastKnown) {
+      setLastLocation({
+        lat: lastKnown.coords.latitude,
+        lng: lastKnown.coords.longitude,
+      });
+      return true;
     }
 
     try {
-      const { coords } = await Location.getCurrentPositionAsync({
+      const currentLocation = await getFreshCurrentPosition({
         accuracy: Location.Accuracy.Balanced,
       });
+      if (!currentLocation) {
+        setLastLocation(null);
+        return false;
+      }
+
+      const { coords } = currentLocation;
       setLastLocation({ lat: coords.latitude, lng: coords.longitude });
       return true;
     } catch {
@@ -276,6 +287,22 @@ export function useDevicePermissionsState(sessionActive: boolean) {
   useEffect(() => {
     refreshPermissions();
   }, [refreshPermissions, sessionActive]);
+
+  useEffect(() => {
+    if (isWeb) {
+      return;
+    }
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void refreshPermissions();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [refreshPermissions]);
 
   useEffect(() => {
     if (sessionActive) {

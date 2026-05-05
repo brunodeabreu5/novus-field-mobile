@@ -23,6 +23,9 @@
           "location",
           "remote-notification"
         ],
+        "NSLocationWhenInUseUsageDescription": "NovusField necesita su ubicacion para registrar visitas y tracking en campo.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "NovusField necesita acceso continuo a la ubicacion para registrar recorridos y visitas en segundo plano.",
+        "NSLocationAlwaysUsageDescription": "NovusField necesita acceso continuo a la ubicacion para registrar recorridos y visitas en segundo plano.",
         "NSCameraUsageDescription": "NovusField necesita acceso a la camara para adjuntar fotos en visitas.",
         "NSPhotoLibraryUsageDescription": "NovusField necesita acceso a la galeria para adjuntar imagenes y documentos.",
         "NSPhotoLibraryAddUsageDescription": "NovusField necesita guardar y compartir archivos generados por el app.",

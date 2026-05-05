@@ -103,11 +103,22 @@ export default function VendorDetailScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Acciones</Text>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => navigation.navigate("Map")}
+        >
           <Ionicons name="map-outline" size={20} color={colors.primary} />
           <Text style={styles.actionText}>Ver en Mapa</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={styles.actionButton}
+          onPress={() => {
+            const parentNav = navigation.getParent();
+            if (parentNav) {
+              parentNav.navigate("Chat", { contactId: vendor.id });
+            }
+          }}
+        >
           <Ionicons name="chatbubbles-outline" size={20} color={colors.primary} />
           <Text style={styles.actionText}>Enviar Mensaje</Text>
         </TouchableOpacity>

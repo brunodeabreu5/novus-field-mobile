@@ -1,4 +1,4 @@
-import { getAccessToken } from "./backend-auth";
+import { getAccessToken, refreshStoredAuthSession } from "./backend-auth";
 import { resolveApiTimeoutMs } from "./config";
 import { getBackendApiUrl } from "./tenant-config";
 
@@ -21,20 +21,18 @@ export function asItemsArray<T>(
   return Array.isArray(payload?.items) ? payload.items : [];
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const accessToken = await getAccessToken();
-  if (!accessToken) {
-    throw new Error("No active backend session");
-  }
-
-  const apiUrl = await getBackendApiUrl();
+async function fetchWithToken(
+  apiUrl: string,
+  path: string,
+  init: RequestInit,
+  accessToken: string,
+) {
   const controller = new AbortController();
   const timeoutMs = resolveApiTimeoutMs();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  let response: Response;
   try {
-    response = await fetch(`${apiUrl}${path}`, {
+    return await fetch(`${apiUrl}${path}`, {
       ...init,
       signal: controller.signal,
       headers: {
@@ -52,12 +50,34 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function parseErrorMessage(response: Response) {
+  const payload = (await response.json().catch(() => null)) as
+    | { message?: string }
+    | null;
+
+  return payload?.message || `HTTP ${response.status}`;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    throw new Error("No active backend session");
+  }
+
+  const apiUrl = await getBackendApiUrl();
+  let response = await fetchWithToken(apiUrl, path, init, accessToken);
+
+  if (response.status === 401) {
+    const refreshedToken = await refreshStoredAuthSession();
+    if (refreshedToken) {
+      response = await fetchWithToken(apiUrl, path, init, refreshedToken);
+    }
+  }
 
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as
-      | { message?: string }
-      | null;
-    throw new Error(payload?.message || `HTTP ${response.status}`);
+    throw new Error(await parseErrorMessage(response));
   }
 
   if (response.status === 204) {

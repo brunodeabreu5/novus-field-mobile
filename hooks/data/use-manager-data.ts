@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchAlerts,
@@ -47,6 +48,14 @@ export function useVendorsData(enabled = true) {
 
 export function useVendorPositionsSubscription(enabled = true) {
   const queryClient = useQueryClient();
-  void enabled;
-  void queryClient;
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const interval = setInterval(() => {
+      void queryClient.invalidateQueries({ queryKey: mobileQueryKeys.map });
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [enabled, queryClient]);
 }

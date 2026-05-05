@@ -11,6 +11,8 @@ import {
   type StyleProp,
   type TextStyle,
 } from "react-native";
+import { useForm, Controller } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "../contexts/AuthContext";
 import { useTenant } from "../contexts/TenantContext";
 import { useDevicePermissions } from "../contexts/DevicePermissionsContext";
@@ -18,6 +20,7 @@ import type { PermissionState } from "../hooks/use-device-permissions-state";
 import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
 import { useTrackingStatus, type TrackingState } from "../providers/TrackingProvider";
+import { profileSchema, type ProfileFormData } from "../lib/schemas";
 import { colors } from "../theme/colors";
 
 interface SecuritySectionProps {
@@ -468,23 +471,36 @@ export default function AccountScreen() {
   const { clearTenant, tenant } = useTenant();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [fullName, setFullName] = useState(profile?.full_name || "");
-  const [phone, setPhone] = useState(profile?.phone || "");
-  const [roleTitle, setRoleTitle] = useState(profile?.role_title || "");
+
+  const {
+    control,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<ProfileFormData>({
+    resolver: zodResolver(profileSchema),
+    defaultValues: {
+      fullName: profile?.full_name || "",
+      phone: profile?.phone || "",
+      roleTitle: profile?.role_title || "",
+    },
+  });
 
   useEffect(() => {
-    setFullName(profile?.full_name || "");
-    setPhone(profile?.phone || "");
-    setRoleTitle(profile?.role_title || "");
-  }, [profile?.full_name, profile?.phone, profile?.role_title]);
+    reset({
+      fullName: profile?.full_name || "",
+      phone: profile?.phone || "",
+      roleTitle: profile?.role_title || "",
+    });
+  }, [profile?.full_name, profile?.phone, profile?.role_title, reset]);
 
-  const handleSave = async () => {
+  const handleSave = handleSubmit(async (data) => {
     setSaving(true);
     try {
       await updateProfile({
-        full_name: fullName.trim() || null,
-        phone: phone.trim() || null,
-        role_title: roleTitle.trim() || null,
+        full_name: data.fullName.trim() || null,
+        phone: data.phone.trim() || null,
+        role_title: data.roleTitle.trim() || null,
       });
       setEditing(false);
     } catch {
@@ -492,7 +508,7 @@ export default function AccountScreen() {
     } finally {
       setSaving(false);
     }
-  };
+  });
 
   const handleSignOut = () => {
     Alert.alert("Cerrar sesion", "Desea cerrar sesion?", [
@@ -554,33 +570,59 @@ export default function AccountScreen() {
 
       {editing ? (
         <>
-          <FormField
-            label="Nombre completo"
-            value={fullName}
-            onChangeText={setFullName}
-            placeholder="Nombre"
+          <Controller
+            control={control}
+            name="fullName"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <FormField
+                label="Nombre completo"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                placeholder="Nombre"
+                error={errors.fullName?.message}
+              />
+            )}
           />
-          <FormField
-            label="Telefono"
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="Telefono"
-            keyboardType="phone-pad"
+          <Controller
+            control={control}
+            name="phone"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <FormField
+                label="Telefono"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                placeholder="Telefono"
+                keyboardType="phone-pad"
+                error={errors.phone?.message}
+              />
+            )}
           />
-          <FormField
-            label="Cargo / Rol"
-            value={roleTitle}
-            onChangeText={setRoleTitle}
-            placeholder="Ej: Vendedor"
+          <Controller
+            control={control}
+            name="roleTitle"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <FormField
+                label="Cargo / Rol"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+                placeholder="Ej: Vendedor"
+                error={errors.roleTitle?.message}
+              />
+            )}
           />
           <FormActions
             isLoading={saving}
             submitLabel="Guardar"
             onCancel={() => {
               setEditing(false);
-              setFullName(profile?.full_name || "");
-              setPhone(profile?.phone || "");
-              setRoleTitle(profile?.role_title || "");
+              reset({
+                fullName: profile?.full_name || "",
+                phone: profile?.phone || "",
+                roleTitle: profile?.role_title || "",
+              });
             }}
             onSubmit={handleSave}
           />

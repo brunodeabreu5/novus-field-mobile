@@ -1,46 +1,32 @@
 import { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
-import * as TaskManager from "expo-task-manager";
 import { useAuth } from "../contexts/AuthContext";
-import {
-  getStoredGeofenceVendorName,
-  processGeofencePositionInBackground,
-} from "./use-geofence";
 import { isExpectedAuthError } from "../lib/auth-errors";
-import { backendApi } from "../lib/backend-api";
 import { logger } from "../lib/logger";
+import {
+  isFreshLocation,
+  TRACKING_LOCATION_MAX_AGE_MS,
+} from "../lib/location-utils";
 import { NOTIFICATION_TEXTS } from "../lib/notifications";
-import { offlineStorage } from "../lib/offline-storage";
-import { isOfflineLikeError, syncQueuedTrackingActions } from "../lib/sync";
-
-const TRACKING_TASK_NAME = "novus-vendor-background-tracking";
-const TRACKING_VENDOR_ID_KEY = "novus_tracking_vendor_id";
-const TRACKING_LAST_LOCATION_KEY = "novus_tracking_last_location";
-const TRACKING_INTERVAL_MS = 10_000;
-const TRACKING_MIN_DISPLACEMENT_M = 10;
-const TRACKING_BACKGROUND_DISPLACEMENT_M = 0;
-const TRACKING_HEARTBEAT_MS = 60_000;
-
-let taskDefined = false;
-
-interface TrackingLocationBatch {
-  locations?: Location.LocationObject[];
-}
-
-interface TrackingPersistenceOptions {
-  force?: boolean;
-  trackingMode: "background";
-}
-
-interface CachedTrackingLocation {
-  latitude: number;
-  longitude: number;
-  timestamp: number;
-  accuracy?: number | null;
-  speed?: number | null;
-  heading?: number | null;
-}
+import {
+  getLastLocationCacheKey,
+  normalizeTrackingLocation,
+  persistPosition,
+  publishTrackingHeartbeat,
+  resolveCurrentLocation,
+  type TrackingMode,
+  type TrackingStatusMode,
+} from "../lib/vendor-tracking-core";
+import {
+  TRACKING_BACKGROUND_DISPLACEMENT_M,
+  TRACKING_CACHE_MAX_AGE_MS,
+  TRACKING_HEARTBEAT_MS,
+  TRACKING_INTERVAL_MS,
+  TRACKING_LAST_LOCATION_KEY,
+  TRACKING_TASK_NAME,
+  TRACKING_VENDOR_ID_KEY,
+} from "../lib/vendor-tracking-constants";
 
 type MutableRef<T> = { current: T };
 
@@ -49,272 +35,13 @@ interface TrackingLifecycleHandlers {
   readonly lastLocationRef: MutableRef<Location.LocationObject | null>;
   readonly pauseTrackingNetwork: () => void;
   readonly setError: (value: string | null) => void;
-  readonly setTrackingState: (
-    value: "background" | "denied" | "error" | null
-  ) => void;
-  readonly startHeartbeatLoop: (trackingMode: "background") => void;
-}
-
-function haversineDistanceMeters(
-  from: { latitude: number; longitude: number },
-  to: { latitude: number; longitude: number }
-) {
-  const toRad = (value: number) => (value * Math.PI) / 180;
-  const earthRadiusM = 6_371_000;
-  const dLat = toRad(to.latitude - from.latitude);
-  const dLng = toRad(to.longitude - from.longitude);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(from.latitude)) *
-      Math.cos(toRad(to.latitude)) *
-      Math.sin(dLng / 2) ** 2;
-
-  return 2 * earthRadiusM * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function formatSpeedKmh(speed: number | null | undefined) {
-  if (speed == null) {
-    return null;
-  }
-
-  return speed * 3.6;
-}
-
-function buildIdleSnapshot(loc: Location.LocationObject, forceFreshTimestamp = false) {
-  const timestampMs = forceFreshTimestamp ? Date.now() : loc.timestamp ?? Date.now();
-  const snapshot = {
-    latitude: loc.coords.latitude,
-    longitude: loc.coords.longitude,
-    timestamp: timestampMs,
-    accuracy: loc.coords.accuracy ?? null,
-    speed: loc.coords.speed ?? null,
-    heading: loc.coords.heading ?? null,
-  };
-
-  return {
-    snapshot,
-    timestampMs,
-  };
-}
-
-function buildLocationFromSnapshot(snapshot: CachedTrackingLocation) {
-  return {
-    coords: {
-      latitude: snapshot.latitude,
-      longitude: snapshot.longitude,
-      accuracy: snapshot.accuracy ?? null,
-      altitude: null,
-      altitudeAccuracy: null,
-      heading: snapshot.heading ?? null,
-      speed: snapshot.speed ?? null,
-    },
-    timestamp: snapshot.timestamp,
-    mocked: false,
-  } as Location.LocationObject;
-}
-
-function calculateIdleState(
-  loc: Location.LocationObject,
-  lastLocationRaw: string | null,
-  timestampMs: number
-) {
-  let isIdle = false;
-  let idleDurationSeconds: number | null = null;
-
-  if (lastLocationRaw !== null) {
-    try {
-      const previous = JSON.parse(lastLocationRaw) as {
-        latitude: number;
-        longitude: number;
-        timestamp: number;
-      };
-      const distance = haversineDistanceMeters(
-        { latitude: previous.latitude, longitude: previous.longitude },
-        { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
-      );
-      const elapsedSeconds = Math.max(
-        0,
-        Math.round((timestampMs - previous.timestamp) / 1000)
-      );
-
-      if (distance < TRACKING_MIN_DISPLACEMENT_M) {
-        isIdle = true;
-        idleDurationSeconds = elapsedSeconds;
-      }
-    } catch {
-      // Ignore corrupt cache and continue with fresh state.
-    }
-  }
-
-  return { isIdle, idleDurationSeconds };
-}
-
-async function resolveCurrentLocation() {
-  try {
-    const lastKnown = await Location.getLastKnownPositionAsync({});
-    if (lastKnown) {
-      return lastKnown;
-    }
-  } catch {
-    // Ignore and fall back to a live location request.
-  }
-
-  try {
-    const cachedRaw = await AsyncStorage.getItem(TRACKING_LAST_LOCATION_KEY);
-    if (cachedRaw) {
-      const cached = JSON.parse(cachedRaw) as CachedTrackingLocation;
-      if (
-        typeof cached.latitude === "number" &&
-        typeof cached.longitude === "number" &&
-        typeof cached.timestamp === "number"
-      ) {
-        return buildLocationFromSnapshot(cached);
-      }
-    }
-  } catch {
-    // Ignore corrupted cache and continue to live location.
-  }
-
-  try {
-    return await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
-  } catch {
-    return null;
-  }
-}
-
-function isTransientLocationTaskError(error: unknown) {
-  const message = getUnknownErrorMessage(error);
-
-  return message.includes("kCLErrorDomain Code=0");
-}
-
-function getUnknownErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  return "";
-}
-
-async function persistVendorPositionInOfflineQueue(
-  vendorId: string,
-  payload: {
-    latitude: number;
-    longitude: number;
-    accuracyMeters: number | null;
-    speedKmh: number | null;
-    heading: number | null;
-    isIdle: boolean;
-    idleDurationSeconds: number | null;
-    recordedAt: string;
-  }
-) {
-  await offlineStorage.enqueue({
-    type: "vendor_position",
-    payload: {
-      vendorId,
-      latitude: payload.latitude,
-      longitude: payload.longitude,
-      accuracyMeters: payload.accuracyMeters,
-      speedKmh: payload.speedKmh,
-      heading: payload.heading,
-      isIdle: payload.isIdle,
-      idleDurationSeconds: payload.idleDurationSeconds,
-      recordedAt: payload.recordedAt,
-    },
-  });
-}
-
-async function flushQueuedTrackingPositions(reason: string) {
-  try {
-    const synced = await syncQueuedTrackingActions();
-    if (synced > 0) {
-      logger.info("Tracking", `Flushed ${synced} queued tracking position(s) after ${reason}`);
-    }
-  } catch (error) {
-    if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
-      logger.warn(
-        "Tracking",
-        `Failed to flush queued tracking after ${reason}:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
-  }
-}
-
-async function processBackgroundLocationBatch(vendorId: string, locations: Location.LocationObject[]) {
-  const geofenceVendorName = await getStoredGeofenceVendorName();
-
-  if (locations.length === 0) {
-    const fallbackLocation = await resolveCurrentLocation();
-    if (!fallbackLocation) {
-      return;
-    }
-
-    try {
-      await persistPosition(vendorId, fallbackLocation, {
-        force: true,
-        trackingMode: "background",
-      });
-      await processGeofencePositionInBackground({
-        position: {
-          lat: fallbackLocation.coords.latitude,
-          lng: fallbackLocation.coords.longitude,
-          accuracy: fallbackLocation.coords.accuracy ?? 20,
-        },
-        vendorId,
-        vendorName: geofenceVendorName,
-      });
-    } catch (insertError) {
-      if (isExpectedAuthError(insertError)) {
-        return;
-      }
-
-      logger.warn(
-        "Tracking", "Background fallback position failed:",
-        getUnknownErrorMessage(insertError)
-      );
-    }
-
-    return;
-  }
-
-  for (const location of locations) {
-    try {
-      await persistPosition(vendorId, location, {
-        trackingMode: "background",
-      });
-      await processGeofencePositionInBackground({
-        position: {
-          lat: location.coords.latitude,
-          lng: location.coords.longitude,
-          accuracy: location.coords.accuracy ?? 20,
-        },
-        vendorId,
-        vendorName: geofenceVendorName,
-      });
-    } catch (insertError) {
-      if (isExpectedAuthError(insertError)) {
-        return;
-      }
-
-      logger.warn(
-        "Tracking", "Background position failed:",
-        getUnknownErrorMessage(insertError)
-      );
-    }
-  }
+  readonly setTrackingState: (value: TrackingStatusMode | null) => void;
+  readonly startHeartbeatLoop: (trackingMode: TrackingMode) => void;
 }
 
 async function runHeartbeatTick(
   vendorId: string,
-  trackingMode: "background",
+  trackingMode: TrackingMode,
   handlers: TrackingLifecycleHandlers
 ) {
   const heartbeatPayload = {
@@ -325,20 +52,27 @@ async function runHeartbeatTick(
   } as const;
 
   if (!handlers.lastLocationRef.current) {
-    const currentLocation = await resolveCurrentLocation();
+    const currentLocation = await resolveCurrentLocation(vendorId, TRACKING_CACHE_MAX_AGE_MS);
     if (currentLocation === null) {
       await publishTrackingHeartbeat(vendorId, heartbeatPayload);
       return;
     }
 
     handlers.lastLocationRef.current = currentLocation;
+  } else if (
+    !isFreshLocation(handlers.lastLocationRef.current, TRACKING_LOCATION_MAX_AGE_MS)
+  ) {
+    const currentLocation = await resolveCurrentLocation(vendorId, TRACKING_CACHE_MAX_AGE_MS);
+    if (currentLocation) {
+      handlers.lastLocationRef.current = currentLocation;
+    }
   }
 
   try {
     await persistPosition(vendorId, handlers.lastLocationRef.current, {
       force: true,
       trackingMode,
-    });
+    }, TRACKING_CACHE_MAX_AGE_MS);
     if (handlers.active()) {
       handlers.setError(null);
     }
@@ -370,6 +104,7 @@ async function runHeartbeatTick(
 
 async function initializeTrackingSession(
   vendorId: string,
+  backgroundEnabled: boolean,
   handlers: TrackingLifecycleHandlers
 ) {
   await AsyncStorage.setItem(TRACKING_VENDOR_ID_KEY, vendorId);
@@ -387,58 +122,57 @@ async function initializeTrackingSession(
   }
 
   const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
-  if (backgroundStatus !== "granted") {
-    if (handlers.active()) {
-      handlers.setTrackingState("denied");
-      handlers.setError("Background location permission not granted");
-    }
-    await publishTrackingHeartbeat(vendorId, {
-      trackingMode: "denied",
-      lastError: "Background location permission not granted",
-    });
-    return false;
-  }
+  const canRunBackground = backgroundEnabled && backgroundStatus === "granted";
+  const trackingMode: TrackingMode = canRunBackground ? "background" : "foreground_only";
 
   if (handlers.active()) {
-    handlers.setTrackingState("background");
+    handlers.setTrackingState(trackingMode);
   }
 
   const started = await Location.hasStartedLocationUpdatesAsync(TRACKING_TASK_NAME);
-  if (started) {
+  if (started && !canRunBackground) {
     await Location.stopLocationUpdatesAsync(TRACKING_TASK_NAME);
   }
 
-  await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
-    accuracy: Location.Accuracy.Highest,
-    timeInterval: TRACKING_INTERVAL_MS,
-    distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
-    deferredUpdatesDistance: TRACKING_BACKGROUND_DISPLACEMENT_M,
-    deferredUpdatesInterval: TRACKING_INTERVAL_MS,
-    mayShowUserSettingsDialog: true,
-    pausesUpdatesAutomatically: false,
-    showsBackgroundLocationIndicator: true,
-    foregroundService: {
-      notificationTitle: NOTIFICATION_TEXTS.tracking.foregroundService.title,
-      notificationBody: NOTIFICATION_TEXTS.tracking.foregroundService.body,
-      notificationColor: "#0f172a",
-      killServiceOnDestroy: false,
-    },
-  });
+  if (canRunBackground) {
+    if (started) {
+      await Location.stopLocationUpdatesAsync(TRACKING_TASK_NAME);
+    }
 
-  const currentLocation = await resolveCurrentLocation();
+    await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
+      accuracy: Location.Accuracy.Highest,
+      timeInterval: TRACKING_INTERVAL_MS,
+      distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
+      deferredUpdatesDistance: TRACKING_BACKGROUND_DISPLACEMENT_M,
+      deferredUpdatesInterval: TRACKING_INTERVAL_MS,
+      mayShowUserSettingsDialog: true,
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: true,
+      activityType: Location.ActivityType.OtherNavigation,
+      foregroundService: {
+        notificationTitle: NOTIFICATION_TEXTS.tracking.foregroundService.title,
+        notificationBody: NOTIFICATION_TEXTS.tracking.foregroundService.body,
+        notificationColor: "#0f172a",
+        killServiceOnDestroy: false,
+      },
+    });
+  }
+
+  const currentLocation = await resolveCurrentLocation(vendorId, TRACKING_CACHE_MAX_AGE_MS);
   if (currentLocation) {
     handlers.lastLocationRef.current = currentLocation;
     await persistPosition(vendorId, currentLocation, {
-      trackingMode: "background",
-    });
+      force: !isFreshLocation(currentLocation, TRACKING_LOCATION_MAX_AGE_MS),
+      trackingMode,
+    }, TRACKING_CACHE_MAX_AGE_MS);
   }
-  handlers.startHeartbeatLoop("background");
+  handlers.startHeartbeatLoop(trackingMode);
 
   if (handlers.active()) {
     handlers.setError(null);
   }
 
-  return true;
+  return trackingMode;
 }
 
 async function resetTrackingLifecycle(
@@ -485,145 +219,15 @@ async function handleTrackingFailure(
   });
 }
 
-async function publishTrackingHeartbeat(
-  vendorId: string,
-  payload: {
-    trackingMode: "background" | "denied" | "error";
-    lastPositionAt?: string | null;
-    lastError?: string | null;
-  }
-) {
-  await backendApi.post("/tracking/status", {
-    vendor_id: vendorId,
-    tracking_mode: payload.trackingMode,
-    last_heartbeat_at: new Date().toISOString(),
-    last_position_at: payload.lastPositionAt ?? null,
-    last_error: payload.lastError ?? null,
-  }).catch((error) => {
-    if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
-      logger.warn(
-        "Tracking", "Heartbeat update failed:",
-        error instanceof Error ? error.message : error,
-      );
-    }
-    return null;
-  });
-}
-
-async function persistPosition(
-  vendorId: string,
-  loc: Location.LocationObject,
-  options: TrackingPersistenceOptions
-) {
-  const { snapshot: lastLocationSnapshot, timestampMs } = buildIdleSnapshot(
-    loc,
-    options.force === true
-  );
-  const timestampIso = new Date(timestampMs).toISOString();
-  const lastLocationRaw = await AsyncStorage.getItem(TRACKING_LAST_LOCATION_KEY);
-  const { isIdle, idleDurationSeconds } = calculateIdleState(
-    loc,
-    lastLocationRaw,
-    timestampMs
-  );
-
-  try {
-    await AsyncStorage.setItem(
-      TRACKING_LAST_LOCATION_KEY,
-      JSON.stringify(lastLocationSnapshot)
-    );
-  } catch (storageError) {
-    logger.warn(
-      "Tracking", "Failed to persist last location cache:",
-      storageError instanceof Error ? storageError.message : storageError
-    );
-  }
-
-  const payload = {
-    vendor_id: vendorId,
-    latitude: loc.coords.latitude,
-    longitude: loc.coords.longitude,
-    accuracy_meters: loc.coords.accuracy ?? null,
-    speed_kmh: formatSpeedKmh(loc.coords.speed),
-    heading: loc.coords.heading ?? null,
-    idle_duration_seconds: idleDurationSeconds,
-    is_idle: isIdle,
-    recorded_at: timestampIso,
-  };
-
-  try {
-    await backendApi.post("/tracking/positions", {
-      vendor_id: vendorId,
-      latitude: payload.latitude,
-      longitude: payload.longitude,
-      accuracy_meters: payload.accuracy_meters,
-      speed_kmh: payload.speed_kmh,
-      heading: payload.heading,
-      idle_duration_seconds: payload.idle_duration_seconds,
-      is_idle: payload.is_idle,
-      recorded_at: payload.recorded_at,
-    });
-  } catch (error) {
-    if (isExpectedAuthError(error)) {
-      throw error;
-    }
-
-    if (isOfflineLikeError(error)) {
-      await persistVendorPositionInOfflineQueue(vendorId, {
-        latitude: payload.latitude,
-        longitude: payload.longitude,
-        accuracyMeters: payload.accuracy_meters,
-        speedKmh: payload.speed_kmh,
-        heading: payload.heading,
-        isIdle: payload.is_idle,
-        idleDurationSeconds: payload.idle_duration_seconds,
-        recordedAt: payload.recorded_at,
-      });
-      return;
-    }
-
-    throw new Error(error instanceof Error ? error.message : "Tracking persistence failed");
-  }
-
-  publishTrackingHeartbeat(vendorId, {
-    trackingMode: options.trackingMode,
-    lastPositionAt: timestampIso,
-  });
-
-  await flushQueuedTrackingPositions("position persistence");
-}
-
-if (!taskDefined) {
-  TaskManager.defineTask(
-    TRACKING_TASK_NAME,
-    async ({ data, error }: TaskManager.TaskManagerTaskBody<TrackingLocationBatch>) => {
-      const vendorId = await AsyncStorage.getItem(TRACKING_VENDOR_ID_KEY);
-      if (!vendorId) {
-        return;
-      }
-
-      if (error) {
-        if (!isTransientLocationTaskError(error)) {
-          logger.warn("Tracking", "Background task error:", getUnknownErrorMessage(error));
-        }
-      }
-
-      await processBackgroundLocationBatch(vendorId, data?.locations ?? []);
-    }
-  );
-  taskDefined = true;
-}
-
 export function useVendorTracking(options: {
   enabled: boolean;
+  backgroundEnabled: boolean;
   vendorId?: string | null;
 }) {
-  const { enabled, vendorId } = options;
+  const { enabled, backgroundEnabled, vendorId } = options;
   const { session, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
-  const [trackingState, setTrackingState] = useState<
-    "background" | "denied" | "error" | null
-  >(null);
+  const [trackingState, setTrackingState] = useState<TrackingStatusMode | null>(null);
   const lastLocationRef = useRef<Location.LocationObject | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -648,7 +252,7 @@ export function useVendorTracking(options: {
       }
     };
 
-    const startHeartbeatLoop = (trackingMode: "background") => {
+    const startHeartbeatLoop = (trackingMode: TrackingMode) => {
       stopHeartbeatLoop();
 
       heartbeatTimerRef.current = setInterval(() => {
@@ -663,6 +267,84 @@ export function useVendorTracking(options: {
       }, TRACKING_HEARTBEAT_MS);
     };
 
+    const handleForegroundLocation = async (
+      location: Location.LocationObject,
+      trackingMode: TrackingMode
+    ) => {
+      const normalized = await normalizeTrackingLocation(
+        vendorId!,
+        location,
+        TRACKING_CACHE_MAX_AGE_MS,
+      );
+      if (!normalized) {
+        return;
+      }
+
+      lastLocationRef.current = normalized.location;
+      await persistPosition(vendorId!, normalized.location, {
+        force: normalized.forceTimestamp,
+        trackingMode,
+      }, TRACKING_CACHE_MAX_AGE_MS);
+
+      if (isActive()) {
+        setError(null);
+        setTrackingState(trackingMode);
+      }
+    };
+
+    const startForegroundWatch = async (trackingMode: TrackingMode) => {
+      if (foregroundSubscription) {
+        foregroundSubscription.remove();
+        foregroundSubscription = null;
+      }
+
+      foregroundSubscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: TRACKING_INTERVAL_MS,
+          distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
+          mayShowUserSettingsDialog: true,
+        },
+        (location) => {
+          void handleForegroundLocation(location, trackingMode).catch(async (watchError) => {
+            if (isExpectedAuthError(watchError)) {
+              pauseTrackingNetwork();
+              if (isActive()) {
+                setError(null);
+                setTrackingState(trackingMode);
+              }
+              return;
+            }
+
+            const nextError =
+              watchError instanceof Error
+                ? watchError.message
+                : "Foreground location tracking error";
+            if (isActive()) {
+              setError(nextError);
+              setTrackingState("error");
+            }
+            await publishTrackingHeartbeat(vendorId!, {
+              trackingMode: "error",
+              lastError: nextError,
+            });
+          });
+        },
+        (watchError) => {
+          const nextError =
+            typeof watchError === "string" ? watchError : "Foreground location watch error";
+          if (isActive()) {
+            setError(nextError);
+            setTrackingState("error");
+          }
+          void publishTrackingHeartbeat(vendorId!, {
+            trackingMode: "error",
+            lastError: nextError,
+          });
+        }
+      );
+    };
+
     const stopTrackingCompletely = async () => {
       pauseTrackingNetwork();
 
@@ -673,6 +355,9 @@ export function useVendorTracking(options: {
 
       await AsyncStorage.removeItem(TRACKING_VENDOR_ID_KEY);
       await AsyncStorage.removeItem(TRACKING_LAST_LOCATION_KEY);
+      if (vendorId) {
+        await AsyncStorage.removeItem(getLastLocationCacheKey(vendorId));
+      }
     };
 
     const startTracking = async () => {
@@ -713,7 +398,7 @@ export function useVendorTracking(options: {
       }
 
       try {
-        const started = await initializeTrackingSession(vendorId, {
+        const trackingMode = await initializeTrackingSession(vendorId, backgroundEnabled, {
           active: isActive,
           lastLocationRef,
           pauseTrackingNetwork,
@@ -721,8 +406,11 @@ export function useVendorTracking(options: {
           setTrackingState,
           startHeartbeatLoop,
         });
-        if (!started) {
+        if (!isActive()) {
           return;
+        }
+        if (trackingMode === "foreground_only") {
+          await startForegroundWatch(trackingMode);
         }
       } catch (trackingError) {
         await handleTrackingFailure(vendorId, trackingError, {
@@ -751,7 +439,7 @@ export function useVendorTracking(options: {
         });
       }
     };
-  }, [enabled, loading, session, vendorId]);
+  }, [backgroundEnabled, enabled, loading, session, vendorId]);
 
   return { error, trackingState };
 }

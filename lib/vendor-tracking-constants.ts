@@ -1,0 +1,8 @@
+export const TRACKING_TASK_NAME = "novus-vendor-background-tracking";
+export const TRACKING_VENDOR_ID_KEY = "novus_tracking_vendor_id";
+export const TRACKING_LAST_LOCATION_KEY = "novus_tracking_last_location";
+export const TRACKING_INTERVAL_MS = 10_000;
+export const TRACKING_MIN_DISPLACEMENT_M = 10;
+export const TRACKING_BACKGROUND_DISPLACEMENT_M = 0;
+export const TRACKING_HEARTBEAT_MS = 60_000;
+export const TRACKING_CACHE_MAX_AGE_MS = 5 * 60_000;

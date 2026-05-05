@@ -14,6 +14,12 @@ import {
   type CheckOutPayload,
 } from "../lib/offline-storage";
 import { generateId } from "../lib/ids";
+import {
+  DEFAULT_LOCATION_MAX_AGE_MS,
+  DEFAULT_LOCATION_REQUIRED_ACCURACY_M,
+  getFreshCurrentPosition,
+  getFreshLastKnownPosition,
+} from "../lib/location-utils";
 import { logger } from "../lib/logger";
 
 export interface VisitCheckIn {
@@ -41,22 +47,15 @@ const GEOFENCE_INSIDE_ZONES_KEY = "novus_geofence_inside_zones";
 const GEOFENCE_VENDOR_NAME_KEY = "novus_geofence_vendor_name";
 
 async function resolveCurrentPosition() {
-  try {
-    const lastKnown = await Location.getLastKnownPositionAsync({});
-    if (lastKnown) {
-      return lastKnown;
-    }
-  } catch {
-    // Ignore and fall back to a fresh fix.
+  const lastKnown = await getFreshLastKnownPosition({
+    maxAgeMs: DEFAULT_LOCATION_MAX_AGE_MS,
+    requiredAccuracyMeters: DEFAULT_LOCATION_REQUIRED_ACCURACY_M,
+  });
+  if (lastKnown) {
+    return lastKnown;
   }
 
-  try {
-    return await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
-  } catch {
-    return null;
-  }
+  return getFreshCurrentPosition({ accuracy: Location.Accuracy.Balanced });
 }
 
 async function enqueueGeofenceAction(

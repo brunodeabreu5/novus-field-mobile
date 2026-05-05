@@ -50,20 +50,23 @@ export function useTrackingBootstrap() {
     user,
   ]);
 
-  const canTrack =
+  const canTrackForeground =
     !!user &&
     !!session &&
     isVendor &&
-    locationPermission === "granted" &&
-    backgroundLocationPermission === "granted";
+    locationPermission === "granted";
+
+  const canTrackBackground =
+    canTrackForeground && backgroundLocationPermission === "granted";
 
   const { error: trackingError } = useVendorTracking({
-    enabled: canTrack,
+    enabled: canTrackForeground,
+    backgroundEnabled: canTrackBackground,
     vendorId: user?.id,
   });
 
   const { error: geofenceError } = useGeofence({
-    enabled: canTrack,
+    enabled: canTrackForeground,
     vendorId: user?.id,
     vendorName: profile?.full_name ?? profile?.phone ?? "Vendedor",
     autoCheckIn: true,
