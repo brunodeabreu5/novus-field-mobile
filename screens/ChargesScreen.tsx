@@ -12,6 +12,12 @@ import {
   Alert,
   ScrollView,
 } from "react-native";
+import {
+  showError,
+  showSuccess,
+  showWarning,
+  logError,
+} from "../lib/error-handler";
 import { format, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
@@ -38,78 +44,88 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const formatAmount = (value: number) => `Gs. ${value.toLocaleString("es-PY")}`;
-const normalizeClientName = (value: string) => value.replace(/\s+/g, " ").trim();
+const normalizeClientName = (value: string) =>
+  value.replace(/\s+/g, " ").trim();
 const normalizeAmountInput = (value: string) => value.replace(/\D/g, "");
 const normalizeDueDate = (value: string) => value.trim();
 const normalizeNotes = (value: string) => value.replace(/\s+/g, " ").trim();
 
-const ChargeCard = React.memo(({
-  item,
-  styles,
-  onEdit,
-  onUpdateStatus,
-}: {
-  item: ChargeRecord;
-  styles: any;
-  onEdit: (charge: ChargeRecord) => void;
-  onUpdateStatus: (charge: ChargeRecord) => void;
-}) => (
-  <View
-    style={[
-      styles.card,
-      item.status === "atrasado" ? styles.cardOverdue : null,
-      item.status === "pagado" ? styles.cardPaid : null,
-      item.queued ? styles.cardQueued : null,
-    ]}
-  >
-    <View style={styles.cardHeader}>
-      <Text style={styles.client}>{item.client_name}</Text>
-      <View
-        style={[
-          styles.statusBadge,
-          item.status === "pagado"
-            ? styles.statusPaid
-            : item.status === "atrasado"
-            ? styles.statusOverdue
-            : styles.statusPending,
-        ]}
-      >
-        <Text
+const ChargeCard = React.memo(
+  ({
+    item,
+    styles,
+    onEdit,
+    onUpdateStatus,
+  }: {
+    item: ChargeRecord;
+    styles: any;
+    onEdit: (charge: ChargeRecord) => void;
+    onUpdateStatus: (charge: ChargeRecord) => void;
+  }) => (
+    <View
+      style={[
+        styles.card,
+        item.status === "atrasado" ? styles.cardOverdue : null,
+        item.status === "pagado" ? styles.cardPaid : null,
+        item.queued ? styles.cardQueued : null,
+      ]}
+    >
+      <View style={styles.cardHeader}>
+        <Text style={styles.client}>{item.client_name}</Text>
+        <View
           style={[
-            styles.statusText,
+            styles.statusBadge,
             item.status === "pagado"
-              ? styles.statusTextPaid
+              ? styles.statusPaid
               : item.status === "atrasado"
-              ? styles.statusTextOverdue
-              : styles.statusTextPending,
+                ? styles.statusOverdue
+                : styles.statusPending,
           ]}
         >
-          {STATUS_LABELS[item.status] || item.status}
+          <Text
+            style={[
+              styles.statusText,
+              item.status === "pagado"
+                ? styles.statusTextPaid
+                : item.status === "atrasado"
+                  ? styles.statusTextOverdue
+                  : styles.statusTextPending,
+            ]}
+          >
+            {STATUS_LABELS[item.status] || item.status}
+          </Text>
+        </View>
+      </View>
+      <Text style={styles.amount}>{formatAmount(item.amount)}</Text>
+      {item.due_date ? (
+        <Text style={styles.due}>
+          Vence:{" "}
+          {format(new Date(item.due_date), "dd MMM yyyy", { locale: es })}
         </Text>
+      ) : null}
+      {item.notes ? <Text style={styles.notes}>{item.notes}</Text> : null}
+      {item.queued ? (
+        <View style={styles.queueBadge}>
+          <Text style={styles.queueBadgeText}>Pendiente de sync</Text>
+        </View>
+      ) : null}
+      <View style={styles.cardActions}>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={() => onEdit(item)}
+        >
+          <Text style={styles.secondaryButtonText}>Editar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => onUpdateStatus(item)}
+        >
+          <Text style={styles.primaryButtonText}>Cambiar estado</Text>
+        </TouchableOpacity>
       </View>
     </View>
-    <Text style={styles.amount}>{formatAmount(item.amount)}</Text>
-    {item.due_date ? (
-      <Text style={styles.due}>
-        Vence: {format(new Date(item.due_date), "dd MMM yyyy", { locale: es })}
-      </Text>
-    ) : null}
-    {item.notes ? <Text style={styles.notes}>{item.notes}</Text> : null}
-    {item.queued ? (
-      <View style={styles.queueBadge}>
-        <Text style={styles.queueBadgeText}>Pendiente de sync</Text>
-      </View>
-    ) : null}
-    <View style={styles.cardActions}>
-      <TouchableOpacity style={styles.secondaryButton} onPress={() => onEdit(item)}>
-        <Text style={styles.secondaryButtonText}>Editar</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.primaryButton} onPress={() => onUpdateStatus(item)}>
-        <Text style={styles.primaryButtonText}>Cambiar estado</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-));
+  ),
+);
 
 export default function ChargesScreen() {
   const { colors } = useTheme();
@@ -204,7 +220,12 @@ export default function ChargesScreen() {
     setEditingCharge(null);
   };
 
-  const modalTitle = activePicker === "client" ? "Seleccionar Cliente" : editingCharge ? "Editar Cobro" : "Nuevo Cobro";
+  const modalTitle =
+    activePicker === "client"
+      ? "Seleccionar Cliente"
+      : editingCharge
+        ? "Editar Cobro"
+        : "Nuevo Cobro";
 
   const saveCharge = handleSubmit(async (data) => {
     if (!user || !profile) {
@@ -245,10 +266,8 @@ export default function ChargesScreen() {
       setEditingCharge(null);
       reset();
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "No se pudo guardar el cobro"
-      );
+      logError("ChargesScreen/save", error);
+      showError(error, "Error al guardar cobro");
     }
   });
 
@@ -269,16 +288,20 @@ export default function ChargesScreen() {
         ...statusOptions.map((status) => ({
           text: STATUS_LABELS[status] || status,
           onPress: () => {
-            void updateChargeStatusMutation.mutateAsync({
-              userId: user.id,
-              chargeId: charge.id,
-              status,
-            }).catch((error) => {
-              Alert.alert(
-                "Error",
-                error instanceof Error ? error.message : "No se pudo actualizar el estado",
-              );
-            });
+            void updateChargeStatusMutation
+              .mutateAsync({
+                userId: user.id,
+                chargeId: charge.id,
+                status,
+              })
+              .catch((error) => {
+                Alert.alert(
+                  "Error",
+                  error instanceof Error
+                    ? error.message
+                    : "No se pudo actualizar el estado",
+                );
+              });
           },
         })),
       ],
@@ -363,7 +386,10 @@ export default function ChargesScreen() {
           <ScrollView>
             <Text style={styles.label}>Cliente *</Text>
             <TouchableOpacity
-              style={[styles.input, errors.clientName ? styles.inputError : null]}
+              style={[
+                styles.input,
+                errors.clientName ? styles.inputError : null,
+              ]}
               onPress={() => setActivePicker("client")}
             >
               <Text
@@ -375,7 +401,9 @@ export default function ChargesScreen() {
             {errors.clientName ? (
               <Text style={styles.errorText}>{errors.clientName.message}</Text>
             ) : (
-              <Text style={styles.helpText}>Seleccione un cliente existente para asociar el cobro.</Text>
+              <Text style={styles.helpText}>
+                Seleccione un cliente existente para asociar el cobro.
+              </Text>
             )}
             <Controller
               control={control}
@@ -432,7 +460,9 @@ export default function ChargesScreen() {
               )}
             />
             <FormActions
-              isLoading={createChargeMutation.isPending || updateChargeMutation.isPending}
+              isLoading={
+                createChargeMutation.isPending || updateChargeMutation.isPending
+              }
               submitLabel={editingCharge ? "Guardar cambios" : "Crear Cobro"}
               onCancel={() => {
                 setModalVisible(false);
@@ -631,5 +661,5 @@ const useStyles = (colors: ThemeColors) =>
           fontWeight: "600",
         },
       }),
-    [colors]
+    [colors],
   );

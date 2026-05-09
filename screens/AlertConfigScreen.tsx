@@ -12,6 +12,12 @@ import {
 } from "react-native";
 import { backendApi } from "../lib/backend-api";
 import { colors } from "../theme/colors";
+import {
+  showError,
+  showSuccess,
+  showWarning,
+  logError,
+} from "../lib/error-handler";
 
 type GeofenceConfig = {
   id: string;
@@ -37,7 +43,8 @@ export default function AlertConfigScreen() {
     async function loadConfig() {
       setLoading(true);
       try {
-        const data = await backendApi.get<GeofenceConfig[]>("/geofence/configs");
+        const data =
+          await backendApi.get<GeofenceConfig[]>("/geofence/configs");
         const first = data[0] || null;
         setConfig(first);
         if (first) {
@@ -47,10 +54,8 @@ export default function AlertConfigScreen() {
           setEnabled(first.enabled ?? true);
         }
       } catch (error) {
-        Alert.alert(
-          "Error",
-          error instanceof Error ? error.message : "No se pudo cargar la configuración"
-        );
+        logError("AlertConfig/load", error);
+        showError(error, "Error al cargar configuración");
       } finally {
         setLoading(false);
       }
@@ -63,7 +68,7 @@ export default function AlertConfigScreen() {
 
     const radius = Number(radiusMeters);
     if (Number.isNaN(radius) || radius < 10) {
-      Alert.alert("Validación", "El radio debe ser al menos 10 metros.");
+      showWarning("Validación", "El radio debe ser al menos 10 metros.");
       return;
     }
 
@@ -78,12 +83,10 @@ export default function AlertConfigScreen() {
         alert_on_exit: alertOnExit,
         enabled,
       });
-      Alert.alert("Guardado", "Configuración actualizada correctamente.");
+      showSuccess("Configuración actualizada correctamente.");
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "No se pudo guardar la configuración"
-      );
+      logError("AlertConfig/save", error);
+      showError(error, "Error al guardar configuración");
     } finally {
       setSaving(false);
     }
@@ -101,11 +104,13 @@ export default function AlertConfigScreen() {
     return (
       <ScrollView style={styles.container}>
         <Text style={styles.description}>
-          Configura las distancias y notificaciones para alertas de desvío y falta de movimiento de los vendedores.
+          Configura las distancias y notificaciones para alertas de desvío y
+          falta de movimiento de los vendedores.
         </Text>
         <View style={styles.section}>
           <Text style={styles.emptyText}>
-            Sin configuraciones de geofence. Use la web de administración para crear zonas.
+            Sin configuraciones de geofence. Use la web de administración para
+            crear zonas.
           </Text>
         </View>
       </ScrollView>
@@ -115,7 +120,8 @@ export default function AlertConfigScreen() {
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.description}>
-        Configura las distancias y notificaciones para alertas de desvío y falta de movimiento de los vendedores.
+        Configura las distancias y notificaciones para alertas de desvío y falta
+        de movimiento de los vendedores.
       </Text>
 
       <View style={styles.section}>
@@ -132,11 +138,15 @@ export default function AlertConfigScreen() {
           onChangeText={setRadiusMeters}
           placeholder="Ej: 100"
         />
-        <Text style={styles.helperText}>Radio de tolerancia para considerar un desvío.</Text>
+        <Text style={styles.helperText}>
+          Radio de tolerancia para considerar un desvío.
+        </Text>
       </View>
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { marginBottom: 16 }]}>Tipo de Alertas</Text>
+        <Text style={[styles.sectionTitle, { marginBottom: 16 }]}>
+          Tipo de Alertas
+        </Text>
 
         <View style={styles.settingRow}>
           <View style={styles.settingInfo}>

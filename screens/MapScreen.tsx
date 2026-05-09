@@ -1,15 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Camera,
-  type CameraRef,
-  LineLayer,
-  MapView,
-  PointAnnotation,
-  ShapeSource,
-  UserLocation,
-  UserLocationRenderMode,
-} from "@maplibre/maplibre-react-native";
-import {
   View,
   Text,
   StyleSheet,
@@ -34,9 +24,20 @@ import { getRuntimeConfigWarnings } from "../lib/config";
 import { getMapboxMapStyle } from "../lib/mapbox-tiles";
 import { colors } from "../theme/colors";
 
+// Lazy load maplibre to handle missing native module in dev builds
+let MapLibre: typeof import("@maplibre/maplibre-react-native") | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  MapLibre = require("@maplibre/maplibre-react-native");
+} catch (e) {
+  console.warn("[MapScreen] @maplibre/maplibre-react-native not available");
+}
+
 function formatDuration(minutesOrSeconds: number, unit: "minutes" | "seconds") {
   const totalMinutes =
-    unit === "seconds" ? Math.max(1, Math.round(minutesOrSeconds / 60)) : minutesOrSeconds;
+    unit === "seconds"
+      ? Math.max(1, Math.round(minutesOrSeconds / 60))
+      : minutesOrSeconds;
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
@@ -49,11 +50,10 @@ function formatDuration(minutesOrSeconds: number, unit: "minutes" | "seconds") {
 
 export default function MapScreen() {
   const { isManagerOrAdmin } = useAuth();
-  const cameraRef = useRef<CameraRef | null>(null);
   const replayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [selectedVendorId, setSelectedVendorId] = useState<string>("");
   const [historyDate, setHistoryDate] = useState(
-    format(new Date(), "yyyy-MM-dd")
+    format(new Date(), "yyyy-MM-dd"),
   );
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayRunning, setReplayRunning] = useState(false);
@@ -65,32 +65,39 @@ export default function MapScreen() {
     useVendorPositions(isManagerOrAdmin);
   const { data: vendors = [] } = useVendorsData(isManagerOrAdmin);
   const { data: clients = [] } = useClientsData();
-  const {
-    data: history,
-    isLoading: isLoadingHistory,
-  } = useVendorRouteHistory(selectedVendorId || undefined, historyDate || undefined);
+  const { data: history, isLoading: isLoadingHistory } = useVendorRouteHistory(
+    selectedVendorId || undefined,
+    historyDate || undefined,
+  );
   const [showClients, setShowClients] = useState(true);
 
   useVendorPositionsSubscription(isManagerOrAdmin);
 
   const latestByVendor = useMemo(() => {
-    return positions.reduce((acc, position) => {
-      const current = acc[position.vendor_id];
-      if (
-        !current ||
-        new Date(position.recorded_at).getTime() > new Date(current.recorded_at).getTime()
-      ) {
-        acc[position.vendor_id] = position;
-      }
-      return acc;
-    }, {} as Record<string, (typeof positions)[number]>);
+    return positions.reduce(
+      (acc, position) => {
+        const current = acc[position.vendor_id];
+        if (
+          !current ||
+          new Date(position.recorded_at).getTime() >
+            new Date(current.recorded_at).getTime()
+        ) {
+          acc[position.vendor_id] = position;
+        }
+        return acc;
+      },
+      {} as Record<string, (typeof positions)[number]>,
+    );
   }, [positions]);
 
   const vendorNameById = useMemo(() => {
-    return vendors.reduce((acc, vendor) => {
-      acc[vendor.user_id] = vendor.full_name || vendor.user_id.slice(0, 8);
-      return acc;
-    }, {} as Record<string, string>);
+    return vendors.reduce(
+      (acc, vendor) => {
+        acc[vendor.user_id] = vendor.full_name || vendor.user_id.slice(0, 8);
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
   }, [vendors]);
 
   const liveMarkers = useMemo(
@@ -100,7 +107,7 @@ export default function MapScreen() {
         vendorName:
           vendorNameById[position.vendor_id] || position.vendor_id.slice(0, 8),
       })),
-    [latestByVendor, vendorNameById]
+    [latestByVendor, vendorNameById],
   );
 
   const clientMarkers = useMemo(() => {
@@ -199,8 +206,8 @@ export default function MapScreen() {
       <View style={styles.center}>
         <Text style={styles.title}>Rastreo restringido</Text>
         <Text style={styles.subtitle}>
-          El historial y el mapa de movimiento solo estan disponibles para admin y
-          manager.
+          El historial y el mapa de movimiento solo estan disponibles para admin
+          y manager.
         </Text>
       </View>
     );
@@ -213,6 +220,38 @@ export default function MapScreen() {
       </View>
     );
   }
+
+  // Show fallback if map library is not available
+  if (!MapLibre) {
+    return (
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+      >
+        <View style={styles.mapCard}>
+          <Text style={styles.sectionTitle}>Mapa en vivo</Text>
+          <View style={styles.center}>
+            <Text style={styles.title}>Mapa no disponible</Text>
+            <Text style={styles.subtitle}>
+              El mapa requiere la reconstruccion del proyecto nativo.
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  const {
+    MapView,
+    Camera,
+    PointAnnotation,
+    ShapeSource,
+    LineLayer,
+    UserLocation,
+    UserLocationRenderMode,
+  } = MapLibre;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cameraRef = useRef<any>(null);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -231,7 +270,10 @@ export default function MapScreen() {
           <Camera
             ref={cameraRef}
             defaultSettings={{
-              centerCoordinate: [defaultRegion.longitude, defaultRegion.latitude],
+              centerCoordinate: [
+                defaultRegion.longitude,
+                defaultRegion.latitude,
+              ],
               zoomLevel: 10,
             }}
           />
@@ -280,7 +322,10 @@ export default function MapScreen() {
           {trail.length > 1 ? (
             <PointAnnotation
               id="trail-end"
-              coordinate={[trail[trail.length - 1].lng, trail[trail.length - 1].lat]}
+              coordinate={[
+                trail[trail.length - 1].lng,
+                trail[trail.length - 1].lat,
+              ]}
               title="Fin"
             >
               <MapPin color={colors.destructive} label="F" size="sm" />
@@ -348,10 +393,7 @@ export default function MapScreen() {
                 onPress={() => setSelectedVendorId(vendor.user_id)}
               >
                 <Text
-                  style={[
-                    styles.chipText,
-                    selected && styles.chipTextSelected,
-                  ]}
+                  style={[styles.chipText, selected && styles.chipTextSelected]}
                 >
                   {vendor.full_name || vendor.user_id.slice(0, 8)}
                 </Text>
@@ -370,7 +412,10 @@ export default function MapScreen() {
         />
 
         {isLoadingHistory ? (
-          <ActivityIndicator style={styles.loadingInline} color={colors.primary} />
+          <ActivityIndicator
+            style={styles.loadingInline}
+            color={colors.primary}
+          />
         ) : trail.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>Sin recorrido</Text>
@@ -402,7 +447,10 @@ export default function MapScreen() {
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Tiempo parado</Text>
                 <Text style={styles.metricValue}>
-                  {formatDuration(historyStats?.totalIdleTimeSec || 0, "seconds")}
+                  {formatDuration(
+                    historyStats?.totalIdleTimeSec || 0,
+                    "seconds",
+                  )}
                 </Text>
               </View>
             </View>
@@ -449,7 +497,7 @@ export default function MapScreen() {
                   style={styles.replayButton}
                   onPress={() =>
                     setReplayIndex((current) =>
-                      Math.min(trail.length - 1, current + 1)
+                      Math.min(trail.length - 1, current + 1),
                     )
                   }
                 >

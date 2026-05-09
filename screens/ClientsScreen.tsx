@@ -9,6 +9,7 @@ import {
   TextInput,
   Alert,
 } from "react-native";
+import { showError, showSuccess, logError } from "../lib/error-handler";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -49,9 +50,13 @@ const isValidPhone = (phone: string): boolean => {
 };
 
 const normalizeName = (value: string) => value.replace(/\s+/g, " ").trim();
-const normalizeDocument = (value: string) => value.replace(/\s+/g, " ").trim().toUpperCase();
+const normalizeDocument = (value: string) =>
+  value.replace(/\s+/g, " ").trim().toUpperCase();
 const normalizePhone = (value: string) =>
-  value.replace(/[^\d\s+\-()]/g, "").replace(/\s+/g, " ").trim();
+  value
+    .replace(/[^\d\s+\-()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizeAddress = (value: string) => value.replace(/\s+/g, " ").trim();
 
@@ -139,16 +144,15 @@ export default function ClientsScreen() {
   const { data: clients = [], isLoading } = useClientsData();
   const createClientMutation = useCreateClient();
   const updateClientMutation = useUpdateClient();
-  const {
-    locationPermission,
-    requestLocationPermission,
-  } = useDevicePermissions();
+  const { locationPermission, requestLocationPermission } =
+    useDevicePermissions();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [search, setSearch] = useState("");
   const [gpsLoading, setGpsLoading] = useState(false);
   const [addressSearching, setAddressSearching] = useState(false);
-  const [pickerViewport, setPickerViewport] = useState<PickerViewport>(DEFAULT_VIEWPORT);
+  const [pickerViewport, setPickerViewport] =
+    useState<PickerViewport>(DEFAULT_VIEWPORT);
 
   const {
     control,
@@ -184,9 +188,9 @@ export default function ClientsScreen() {
           client.name.toLowerCase().includes(search.toLowerCase()) ||
           (client.phone || "").toLowerCase().includes(search.toLowerCase()) ||
           (client.email || "").toLowerCase().includes(search.toLowerCase()) ||
-          (client.address || "").toLowerCase().includes(search.toLowerCase())
+          (client.address || "").toLowerCase().includes(search.toLowerCase()),
       ),
-    [clients, search]
+    [clients, search],
   );
 
   const openModal = () => {
@@ -215,7 +219,7 @@ export default function ClientsScreen() {
   const updateLocation = (
     latitude: number,
     longitude: number,
-    nextAddress?: string
+    nextAddress?: string,
   ) => {
     if (nextAddress) {
       setValue("address", nextAddress);
@@ -309,7 +313,7 @@ export default function ClientsScreen() {
       if (currentPermission !== "granted") {
         Alert.alert(
           "GPS no disponible",
-          "Debe permitir acceso a la ubicacion para capturar el punto del cliente."
+          "Debe permitir acceso a la ubicacion para capturar el punto del cliente.",
         );
         return;
       }
@@ -319,7 +323,7 @@ export default function ClientsScreen() {
       if (!position) {
         Alert.alert(
           "GPS no disponible",
-          "No se pudo obtener una ubicacion ahora. Puede mover el pin manualmente."
+          "No se pudo obtener una ubicacion ahora. Puede mover el pin manualmente.",
         );
         return;
       }
@@ -330,7 +334,7 @@ export default function ClientsScreen() {
         "Error GPS",
         error instanceof Error
           ? error.message
-          : "No se pudo obtener la ubicacion actual"
+          : "No se pudo obtener la ubicacion actual",
       );
     } finally {
       setGpsLoading(false);
@@ -343,7 +347,7 @@ export default function ClientsScreen() {
     if (!normalizedAddress || normalizedAddress.length < 3) {
       Alert.alert(
         "Direccion requerida",
-        "Ingrese una direccion mas completa para buscar coordenadas."
+        "Ingrese una direccion mas completa para buscar coordenadas.",
       );
       return;
     }
@@ -357,7 +361,7 @@ export default function ClientsScreen() {
       if (error instanceof Error && error.message === "Address not found") {
         Alert.alert(
           "Direccion no encontrada",
-          "No fue posible encontrar coordenadas para esta direccion."
+          "No fue posible encontrar coordenadas para esta direccion.",
         );
         return;
       }
@@ -366,7 +370,7 @@ export default function ClientsScreen() {
         "Error buscando direccion",
         error instanceof Error
           ? error.message
-          : "No se pudo buscar la direccion"
+          : "No se pudo buscar la direccion",
       );
     } finally {
       setAddressSearching(false);
@@ -396,7 +400,7 @@ export default function ClientsScreen() {
     if ((latitude === null) !== (longitude === null)) {
       Alert.alert(
         "Ubicacion incompleta",
-        "Latitude y longitude deben estar completas o vacias."
+        "Latitude y longitude deben estar completas o vacias.",
       );
       return;
     }
@@ -438,10 +442,8 @@ export default function ClientsScreen() {
       }
       closeModal();
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "No se pudo guardar el cliente"
-      );
+      logError("ClientsScreen/save", error);
+      showError(error, "Error al guardar cliente");
     }
   });
 
@@ -465,22 +467,27 @@ export default function ClientsScreen() {
 
   const selectedCoordinate =
     formLatitude.trim() && formLongitude.trim()
-      ? ([Number.parseFloat(formLongitude), Number.parseFloat(formLatitude)] as [
-          number,
-          number,
-        ])
+      ? ([
+          Number.parseFloat(formLongitude),
+          Number.parseFloat(formLatitude),
+        ] as [number, number])
       : null;
 
   const renderClient = ({ item }: { item: Client }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.name}>{item.name}</Text>
-        <TouchableOpacity style={styles.editBtn} onPress={() => openEditModal(item)}>
+        <TouchableOpacity
+          style={styles.editBtn}
+          onPress={() => openEditModal(item)}
+        >
           <Text style={styles.editBtnText}>Editar</Text>
         </TouchableOpacity>
       </View>
       {item.phone ? <Text style={styles.meta}>Tel: {item.phone}</Text> : null}
-      {item.document ? <Text style={styles.meta}>RUC/DOC: {item.document}</Text> : null}
+      {item.document ? (
+        <Text style={styles.meta}>RUC/DOC: {item.document}</Text>
+      ) : null}
       {item.address ? (
         <Text style={styles.meta} numberOfLines={1}>
           Dir: {item.address}
@@ -607,7 +614,11 @@ export default function ClientsScreen() {
                 onChange(normalizeAddress(value));
               }}
               error={errors.address?.message}
-              helpText={!hasLocation ? "Use GPS, el mapa o la busqueda por direccion para fijar la ubicacion." : null}
+              helpText={
+                !hasLocation
+                  ? "Use GPS, el mapa o la busqueda por direccion para fijar la ubicacion."
+                  : null
+              }
             />
           )}
         />
@@ -643,7 +654,9 @@ export default function ClientsScreen() {
 
         {mapWarnings.length ? (
           <View style={styles.warningBox}>
-            <Text style={styles.warningTitle}>Revisar configuracion del mapa</Text>
+            <Text style={styles.warningTitle}>
+              Revisar configuracion del mapa
+            </Text>
             <Text style={styles.warningText}>{mapWarnings[0]}</Text>
           </View>
         ) : null}
@@ -664,7 +677,10 @@ export default function ClientsScreen() {
               <Camera
                 ref={cameraRef}
                 defaultSettings={{
-                  centerCoordinate: [pickerViewport.longitude, pickerViewport.latitude],
+                  centerCoordinate: [
+                    pickerViewport.longitude,
+                    pickerViewport.latitude,
+                  ],
                   zoomLevel: pickerViewport.zoomLevel,
                 }}
               />
@@ -692,7 +708,9 @@ export default function ClientsScreen() {
                 setValue("longitude", "");
               }}
             >
-              <Text style={styles.clearLocationButtonText}>Limpiar ubicacion</Text>
+              <Text style={styles.clearLocationButtonText}>
+                Limpiar ubicacion
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
@@ -711,7 +729,10 @@ export default function ClientsScreen() {
               <Camera
                 ref={cameraRef}
                 defaultSettings={{
-                  centerCoordinate: [pickerViewport.longitude, pickerViewport.latitude],
+                  centerCoordinate: [
+                    pickerViewport.longitude,
+                    pickerViewport.latitude,
+                  ],
                   zoomLevel: pickerViewport.zoomLevel,
                 }}
               />
@@ -727,14 +748,19 @@ export default function ClientsScreen() {
               ) : null}
             </MapView>
             <Text style={styles.coordinatesLabel}>
-              Toque el mapa, use GPS o busque por direccion para colocar el pin del cliente.
+              Toque el mapa, use GPS o busque por direccion para colocar el pin
+              del cliente.
             </Text>
           </View>
         )}
         {errors.latitude || errors.longitude ? (
-          <Text style={styles.locationErrorText}>{errors.latitude?.message || errors.longitude?.message}</Text>
+          <Text style={styles.locationErrorText}>
+            {errors.latitude?.message || errors.longitude?.message}
+          </Text>
         ) : hasLocation ? (
-          <Text style={styles.locationHintText}>Ubicacion lista para guardar.</Text>
+          <Text style={styles.locationHintText}>
+            Ubicacion lista para guardar.
+          </Text>
         ) : null}
         <Controller
           control={control}
@@ -751,7 +777,9 @@ export default function ClientsScreen() {
         />
 
         <FormActions
-          isLoading={createClientMutation.isPending || updateClientMutation.isPending}
+          isLoading={
+            createClientMutation.isPending || updateClientMutation.isPending
+          }
           submitLabel={editingClient ? "Actualizar" : "Guardar"}
           onCancel={closeModal}
           onSubmit={handleSaveClient}

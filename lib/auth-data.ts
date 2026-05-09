@@ -1,7 +1,17 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as SecureStore from "expo-secure-store";
 import type { Profile } from "../contexts/AuthContext";
 import { clearAuthMemoryCache } from "./backend-auth";
+
+// expo-secure-store may not be available in all builds (e.g., web, some dev builds)
+// Use try-catch at runtime to handle missing native module
+let SecureStore: typeof import("expo-secure-store") | null = null;
+try {
+  SecureStore = require("expo-secure-store");
+} catch (e) {
+  console.warn(
+    "[auth-data] expo-secure-store not available, using AsyncStorage only",
+  );
+}
 
 export const PROFILE_DISMISSED_KEY = "profile_dismissed";
 
@@ -16,7 +26,11 @@ export async function isProfileDismissed(): Promise<boolean> {
 }
 
 export async function clearStaleAuthStorage() {
-  await SecureStore.deleteItemAsync("backend_auth_session");
+  if (SecureStore) {
+    try {
+      await SecureStore.deleteItemAsync("backend_auth_session");
+    } catch {}
+  }
   await AsyncStorage.removeItem("backend_auth_session");
   clearAuthMemoryCache();
 }

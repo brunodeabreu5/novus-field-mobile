@@ -1,7 +1,11 @@
 import { endOfDay, startOfDay, startOfWeek } from "date-fns";
 import { es } from "date-fns/locale";
 import * as FileSystem from "expo-file-system/legacy";
-import { asItemsArray, backendApi, type CollectionResponse } from "../backend-api";
+import {
+  asItemsArray,
+  backendApi,
+  type CollectionResponse,
+} from "../backend-api";
 import { generateId } from "../ids";
 import { offlineStorage } from "../offline-storage";
 import { isOfflineLikeError } from "../sync";
@@ -12,7 +16,10 @@ import type {
   VisitPeriod,
 } from "./types";
 
-function toQueuedVisitAttachment(visitId: string, attachment: DraftVisitAttachment) {
+function toQueuedVisitAttachment(
+  visitId: string,
+  attachment: DraftVisitAttachment,
+) {
   return {
     attachmentId: generateId(),
     visitId,
@@ -35,7 +42,10 @@ async function deleteLocalFileIfExists(uri: string) {
   }
 }
 
-export async function fetchVisits(userId: string, period: VisitPeriod): Promise<VisitRecord[]> {
+export async function fetchVisits(
+  userId: string,
+  period: VisitPeriod,
+): Promise<VisitRecord[]> {
   const from =
     period === "today"
       ? startOfDay(new Date())
@@ -61,6 +71,7 @@ export async function createVisit(input: {
   clientName: string;
   notes: string;
   visitType: string;
+  amount?: number | null;
 }) {
   const visit: VisitRecord = {
     id: generateId(),
@@ -70,6 +81,7 @@ export async function createVisit(input: {
     client_name: input.clientName.trim(),
     notes: input.notes.trim() || null,
     visit_type: input.visitType,
+    amount: input.amount ?? null,
     check_in_at: new Date().toISOString(),
     photos_count: 0,
     attachments_count: 0,
@@ -82,6 +94,7 @@ export async function createVisit(input: {
       client_name: visit.client_name,
       notes: visit.notes,
       visit_type: visit.visit_type,
+      amount: visit.amount ?? null,
       check_in_at: visit.check_in_at,
     });
     return { visit: created, queued: false as const };
@@ -97,6 +110,7 @@ export async function createVisit(input: {
           clientName: visit.client_name,
           notes: visit.notes,
           visitType: visit.visit_type,
+          amount: visit.amount ?? null,
           timestamp: visit.check_in_at,
         },
       });
@@ -155,14 +169,20 @@ export async function checkoutVisit(input: {
   }
 }
 
-export async function fetchVisitAttachments(visitId: string): Promise<VisitAttachment[]> {
-  const response = await backendApi.get<{ visit_id: string; attachments: VisitAttachment[] }>(
-    `/visits/${encodeURIComponent(visitId)}/attachments`,
-  );
+export async function fetchVisitAttachments(
+  visitId: string,
+): Promise<VisitAttachment[]> {
+  const response = await backendApi.get<{
+    visit_id: string;
+    attachments: VisitAttachment[];
+  }>(`/visits/${encodeURIComponent(visitId)}/attachments`);
   return response.attachments || [];
 }
 
-async function uploadVisitAttachment(visitId: string, attachment: DraftVisitAttachment) {
+async function uploadVisitAttachment(
+  visitId: string,
+  attachment: DraftVisitAttachment,
+) {
   const uploadTarget = await backendApi.post<{
     storage_path: string;
     upload_url: string;
@@ -187,13 +207,16 @@ async function uploadVisitAttachment(visitId: string, attachment: DraftVisitAtta
     throw new Error(`Upload failed: HTTP ${uploadResponse.status}`);
   }
 
-  const created = await backendApi.post<VisitAttachment>(`/visits/${visitId}/attachments`, {
-    storage_path: uploadTarget.storage_path,
-    file_name: attachment.file_name,
-    mime_type: attachment.mime_type,
-    file_size_bytes: attachment.file_size_bytes,
-    attachment_kind: attachment.attachment_kind,
-  });
+  const created = await backendApi.post<VisitAttachment>(
+    `/visits/${visitId}/attachments`,
+    {
+      storage_path: uploadTarget.storage_path,
+      file_name: attachment.file_name,
+      mime_type: attachment.mime_type,
+      file_size_bytes: attachment.file_size_bytes,
+      attachment_kind: attachment.attachment_kind,
+    },
+  );
 
   await deleteLocalFileIfExists(attachment.uri);
 
@@ -232,7 +255,10 @@ export async function uploadVisitAttachments(
   return { uploaded, failed, queued };
 }
 
-export async function deleteVisitAttachment(visitId: string, attachmentId: string) {
+export async function deleteVisitAttachment(
+  visitId: string,
+  attachmentId: string,
+) {
   return backendApi.delete<{ deleted: boolean }>(
     `/visits/${encodeURIComponent(visitId)}/attachments/${encodeURIComponent(attachmentId)}`,
   );

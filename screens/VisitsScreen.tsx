@@ -11,6 +11,15 @@ import {
   Image,
   TextInput,
 } from "react-native";
+import {
+  getErrorMessage,
+  isRetryableError,
+  showError,
+  showSuccess,
+  showWarning,
+  showPermissionDenied,
+  logError,
+} from "../lib/error-handler";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as DocumentPicker from "expo-document-picker";
@@ -50,14 +59,17 @@ import FormField from "../components/FormField";
 import { visitSchema, type VisitFormData } from "../lib/schemas";
 import { colors } from "../theme/colors";
 import { spacing, fontSize, radius } from "../theme/spacing";
-const s = spacing; const f = fontSize; const r = radius;
+const s = spacing;
+const f = fontSize;
+const r = radius;
 
 const getDefaultVisitType = (types: VisitTypeOption[]) =>
   types.find((item) => item.is_default)?.name || types[0]?.name || "";
 
 const EMPTY_VISITS: VisitRecord[] = [];
 
-const normalizeClientName = (value: string) => value.replace(/\s+/g, " ").trim();
+const normalizeClientName = (value: string) =>
+  value.replace(/\s+/g, " ").trim();
 const normalizeVisitType = (value: string) => value.replace(/\s+/g, " ").trim();
 const normalizeNotes = (value: string) => value.replace(/\s+/g, " ").trim();
 const ATTACHMENTS_DIRECTORY = `${FileSystem.documentDirectory || FileSystem.cacheDirectory}visit-attachments`;
@@ -100,7 +112,8 @@ function areAttachmentsByVisitEqual(
   current: Record<string, VisitAttachment[]>,
   next: Record<string, VisitAttachment[]>,
 ) {
-  const compareKeys = (left: string, right: string) => left.localeCompare(right);
+  const compareKeys = (left: string, right: string) =>
+    left.localeCompare(right);
   const currentKeys = Object.keys(current).sort(compareKeys);
   const nextKeys = Object.keys(next).sort(compareKeys);
 
@@ -108,7 +121,10 @@ function areAttachmentsByVisitEqual(
   if (currentKeys.some((key, index) => key !== nextKeys[index])) return false;
 
   return nextKeys.every((key) =>
-    areAttachmentListsEqual(current[key] ?? EMPTY_VISITS, next[key] ?? EMPTY_VISITS),
+    areAttachmentListsEqual(
+      current[key] ?? EMPTY_VISITS,
+      next[key] ?? EMPTY_VISITS,
+    ),
   );
 }
 
@@ -131,7 +147,9 @@ function buildDraftAttachment(input: {
 async function ensureAttachmentsDirectory() {
   const info = await FileSystem.getInfoAsync(ATTACHMENTS_DIRECTORY);
   if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(ATTACHMENTS_DIRECTORY, { intermediates: true });
+    await FileSystem.makeDirectoryAsync(ATTACHMENTS_DIRECTORY, {
+      intermediates: true,
+    });
   }
 }
 
@@ -290,22 +308,39 @@ export default function VisitsScreen() {
   const { user, profile } = useAuth();
   const queryClient = useQueryClient();
   const [modalVisible, setModalVisible] = useState(false);
-  const [activePicker, setActivePicker] = useState<"client" | "type" | null>(null);
+  const [activePicker, setActivePicker] = useState<"client" | "type" | null>(
+    null,
+  );
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const [period, setPeriod] = useState<VisitPeriod>("week");
   const [useManualClientEntry, setUseManualClientEntry] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
-  const [selectedVisitForAttachment, setSelectedVisitForAttachment] = useState<VisitRecord | null>(null);
-  const [attachmentsByVisit, setAttachmentsByVisit] = useState<Record<string, VisitAttachment[]>>({});
-  const [loadingAttachmentsByVisit, setLoadingAttachmentsByVisit] = useState<Record<string, boolean>>({});
+  const [selectedVisitForAttachment, setSelectedVisitForAttachment] =
+    useState<VisitRecord | null>(null);
+  const [attachmentsByVisit, setAttachmentsByVisit] = useState<
+    Record<string, VisitAttachment[]>
+  >({});
+  const [loadingAttachmentsByVisit, setLoadingAttachmentsByVisit] = useState<
+    Record<string, boolean>
+  >({});
   const [uploadingVisitId, setUploadingVisitId] = useState<string | null>(null);
-  const [checkingOutVisitId, setCheckingOutVisitId] = useState<string | null>(null);
+  const [checkingOutVisitId, setCheckingOutVisitId] = useState<string | null>(
+    null,
+  );
   const [pendingAttachmentCountByVisit, setPendingAttachmentCountByVisit] =
     useState<Record<string, number>>({});
-  const [pendingSyncVisitIds, setPendingSyncVisitIds] = useState<Record<string, boolean>>({});
-  const [pendingCheckoutVisitIds, setPendingCheckoutVisitIds] = useState<Record<string, boolean>>({});
-  const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(null);
-  const [draftAttachments, setDraftAttachments] = useState<DraftVisitAttachment[]>([]);
+  const [pendingSyncVisitIds, setPendingSyncVisitIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [pendingCheckoutVisitIds, setPendingCheckoutVisitIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [openingAttachmentId, setOpeningAttachmentId] = useState<string | null>(
+    null,
+  );
+  const [draftAttachments, setDraftAttachments] = useState<
+    DraftVisitAttachment[]
+  >([]);
 
   const {
     control,
@@ -341,14 +376,19 @@ export default function VisitsScreen() {
 
   const visitsWithAttachments = useMemo(
     () =>
-      visits.filter((visit) => (visit.attachments_count || visit.photos_count || 0) > 0),
+      visits.filter(
+        (visit) => (visit.attachments_count || visit.photos_count || 0) > 0,
+      ),
     [visits],
   );
 
   const visitsWithAttachmentsKey = useMemo(
     () =>
       visitsWithAttachments
-        .map((visit) => `${visit.id}:${visit.attachments_count || 0}:${visit.photos_count || 0}`)
+        .map(
+          (visit) =>
+            `${visit.id}:${visit.attachments_count || 0}:${visit.photos_count || 0}`,
+        )
         .join("|"),
     [visitsWithAttachments],
   );
@@ -359,7 +399,9 @@ export default function VisitsScreen() {
       return clients;
     }
 
-    return clients.filter((client) => client.name.toLowerCase().includes(normalized));
+    return clients.filter((client) =>
+      client.name.toLowerCase().includes(normalized),
+    );
   }, [clientSearch, clients]);
 
   const openModal = () => {
@@ -477,7 +519,10 @@ export default function VisitsScreen() {
         <Controller
           control={control}
           name="clientName"
-          render={({ field: { onChange, onBlur, value }, fieldState: { error } }) => (
+          render={({
+            field: { onChange, onBlur, value },
+            fieldState: { error },
+          }) => (
             <>
               {useManualClientEntry ? (
                 <FormField
@@ -499,7 +544,10 @@ export default function VisitsScreen() {
                 <>
                   <Text style={styles.label}>Cliente</Text>
                   <TouchableOpacity
-                    style={[styles.selector, error ? styles.selectorError : null]}
+                    style={[
+                      styles.selector,
+                      error ? styles.selectorError : null,
+                    ]}
                     onPress={() => {
                       setActivePicker("client");
                     }}
@@ -516,7 +564,10 @@ export default function VisitsScreen() {
                   {error ? (
                     <Text style={styles.errorText}>{error.message}</Text>
                   ) : (
-                    <Text style={styles.helpText}>Seleccione un cliente registrado o cambie a cliente no cadastrado.</Text>
+                    <Text style={styles.helpText}>
+                      Seleccione un cliente registrado o cambie a cliente no
+                      cadastrado.
+                    </Text>
                   )}
                 </>
               )}
@@ -551,11 +602,41 @@ export default function VisitsScreen() {
               {error ? (
                 <Text style={styles.errorText}>{error.message}</Text>
               ) : (
-                <Text style={styles.helpText}>Defina el tipo para clasificar mejor la visita.</Text>
+                <Text style={styles.helpText}>
+                  Defina el tipo para clasificar mejor la visita.
+                </Text>
               )}
             </>
           )}
         />
+
+        {/* Show amount field for Venta and Cobranza types */}
+        {(formVisitType === "Venta" || formVisitType === "Cobranza") && (
+          <Controller
+            control={control}
+            name="amount"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <FormField
+                label={
+                  formVisitType === "Venta"
+                    ? "Valor de venta (Gs.)"
+                    : "Monto a cobrar (Gs.)"
+                }
+                placeholder={
+                  formVisitType === "Venta" ? "Ej: 150000" : "Ej: 100000"
+                }
+                value={value || ""}
+                onChangeText={(text) => onChange(text.replace(/\D/g, ""))}
+                keyboardType="number-pad"
+                helpText={
+                  formVisitType === "Venta"
+                    ? "Ingrese el valor total de la venta realizada."
+                    : "Ingrese el monto total a cobrar."
+                }
+              />
+            )}
+          />
+        )}
 
         <Controller
           control={control}
@@ -605,9 +686,9 @@ export default function VisitsScreen() {
 
         {draftAttachments.length > 0 ? (
           <View style={styles.draftAttachmentsList}>
-            {draftAttachments.map((attachment, index) => (
-              renderDraftAttachment(attachment, index)
-            ))}
+            {draftAttachments.map((attachment, index) =>
+              renderDraftAttachment(attachment, index),
+            )}
           </View>
         ) : null}
 
@@ -625,7 +706,9 @@ export default function VisitsScreen() {
     let cancelled = false;
 
     if (visitsWithAttachments.length === 0) {
-      setAttachmentsByVisit((current) => (Object.keys(current).length === 0 ? current : {}));
+      setAttachmentsByVisit((current) =>
+        Object.keys(current).length === 0 ? current : {},
+      );
       return;
     }
 
@@ -668,20 +751,26 @@ export default function VisitsScreen() {
         acc[item.payload.visitId] = (acc[item.payload.visitId] || 0) + 1;
         return acc;
       }, {});
-      const queuedVisits = queue.reduce<Record<string, boolean>>((acc, item) => {
-        if (item.type === "manual_visit_create") {
-          acc[item.payload.visitId] = true;
-        }
+      const queuedVisits = queue.reduce<Record<string, boolean>>(
+        (acc, item) => {
+          if (item.type === "manual_visit_create") {
+            acc[item.payload.visitId] = true;
+          }
 
-        return acc;
-      }, {});
-      const queuedCheckouts = queue.reduce<Record<string, boolean>>((acc, item) => {
-        if (item.type === "check_out") {
-          acc[item.payload.visitId] = true;
-        }
+          return acc;
+        },
+        {},
+      );
+      const queuedCheckouts = queue.reduce<Record<string, boolean>>(
+        (acc, item) => {
+          if (item.type === "check_out") {
+            acc[item.payload.visitId] = true;
+          }
 
-        return acc;
-      }, {});
+          return acc;
+        },
+        {},
+      );
 
       if (!cancelled) {
         setPendingAttachmentCountByVisit(counts);
@@ -707,12 +796,21 @@ export default function VisitsScreen() {
   };
 
   const loadVisitAttachments = async (visitId: string) => {
-    setLoadingAttachmentsByVisit((current) => ({ ...current, [visitId]: true }));
+    setLoadingAttachmentsByVisit((current) => ({
+      ...current,
+      [visitId]: true,
+    }));
     try {
       const attachments = await fetchVisitAttachments(visitId);
-      setAttachmentsByVisit((current) => ({ ...current, [visitId]: attachments }));
+      setAttachmentsByVisit((current) => ({
+        ...current,
+        [visitId]: attachments,
+      }));
     } finally {
-      setLoadingAttachmentsByVisit((current) => ({ ...current, [visitId]: false }));
+      setLoadingAttachmentsByVisit((current) => ({
+        ...current,
+        [visitId]: false,
+      }));
     }
   };
 
@@ -724,7 +822,10 @@ export default function VisitsScreen() {
   const handleCapturePhoto = async (): Promise<DraftVisitAttachment[]> => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (permission.status !== "granted") {
-      Alert.alert("Permiso requerido", "Permita acceso a la cámara para tomar fotos.");
+      showPermissionDenied(
+        "Cámara",
+        "Permita acceso a la cámara para tomar fotos.",
+      );
       return [];
     }
 
@@ -751,7 +852,10 @@ export default function VisitsScreen() {
   const handlePickImage = async (): Promise<DraftVisitAttachment[]> => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== "granted") {
-      Alert.alert("Permiso requerido", "Permita acceso a la galería para adjuntar fotos.");
+      showPermissionDenied(
+        "Galería",
+        "Permita acceso a la galería para adjuntar fotos.",
+      );
       return [];
     }
 
@@ -823,16 +927,16 @@ export default function VisitsScreen() {
       await loadVisitAttachments(visit.id);
       await refreshVisitData();
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "No se pudieron subir los anexos.",
-      );
+      logError("VisitsScreen/upload", error);
+      showError(error, "Error al subir anexos");
     } finally {
       setUploadingVisitId(null);
     }
   };
 
-  const handleAttachmentAction = async (mode: "camera" | "gallery" | "document") => {
+  const handleAttachmentAction = async (
+    mode: "camera" | "gallery" | "document",
+  ) => {
     setAttachmentMenuVisible(false);
 
     let pickedItems: DraftVisitAttachment[] = [];
@@ -865,6 +969,7 @@ export default function VisitsScreen() {
 
     const resolvedClientName = normalizeClientName(data.clientName);
     const resolvedVisitType = normalizeVisitType(data.visitType);
+    const resolvedAmount = data.amount ? parseInt(data.amount, 10) : null;
 
     try {
       const result = await createVisitMutation.mutateAsync({
@@ -874,18 +979,22 @@ export default function VisitsScreen() {
         clientName: resolvedClientName,
         notes: normalizeNotes(data.notes),
         visitType: resolvedVisitType,
+        amount: resolvedAmount,
       });
 
       if (result.queued) {
         if (draftAttachments.length > 0) {
-          const uploadResult = await uploadVisitAttachments(result.visit.id, draftAttachments);
+          const uploadResult = await uploadVisitAttachments(
+            result.visit.id,
+            draftAttachments,
+          );
           if (uploadResult.failed.length > 0) {
-            Alert.alert(
+            showWarning(
               "Visita en cola con errores",
               `${uploadResult.queued} anexo(s) en cola y ${uploadResult.failed.length} con error.`,
             );
           } else {
-            Alert.alert(
+            showWarning(
               "Visita en cola",
               "La visita y sus anexos quedaron en cola para sincronizarse cuando vuelva la conexión.",
             );
@@ -898,7 +1007,10 @@ export default function VisitsScreen() {
       }
 
       if (draftAttachments.length > 0) {
-        const uploadResult = await uploadVisitAttachments(result.visit.id, draftAttachments);
+        const uploadResult = await uploadVisitAttachments(
+          result.visit.id,
+          draftAttachments,
+        );
         if (uploadResult.failed.length > 0) {
           Alert.alert(
             "Visita creada con anexos pendientes",
@@ -911,11 +1023,10 @@ export default function VisitsScreen() {
       setDraftAttachments([]);
       reset();
       await refreshVisitData();
+      showSuccess("✅ Visita creada exitosamente!");
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "No se pudo crear la visita",
-      );
+      logError("VisitsScreen/createVisit", error);
+      showError(error, "Error al crear visita");
     }
   };
 
@@ -923,7 +1034,10 @@ export default function VisitsScreen() {
     try {
       setOpeningAttachmentId(attachment.id);
       const localUri = `${FileSystem.cacheDirectory || FileSystem.documentDirectory}${attachment.id}-${attachment.file_name}`;
-      const downloadResult = await FileSystem.downloadAsync(attachment.signed_url, localUri);
+      const downloadResult = await FileSystem.downloadAsync(
+        attachment.signed_url,
+        localUri,
+      );
       await Sharing.shareAsync(downloadResult.uri);
     } catch (error) {
       Alert.alert(
@@ -935,7 +1049,10 @@ export default function VisitsScreen() {
     }
   };
 
-  const handleDeleteAttachment = async (visitId: string, attachmentId: string) => {
+  const handleDeleteAttachment = async (
+    visitId: string,
+    attachmentId: string,
+  ) => {
     try {
       await deleteVisitAttachment(visitId, attachmentId);
       await loadVisitAttachments(visitId);
@@ -943,7 +1060,9 @@ export default function VisitsScreen() {
     } catch (error) {
       Alert.alert(
         "Error",
-        error instanceof Error ? error.message : "No se pudo eliminar el anexo.",
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar el anexo.",
       );
     }
   };
@@ -975,16 +1094,17 @@ export default function VisitsScreen() {
 
       await refreshVisitData();
     } catch (error) {
-      Alert.alert(
-        "Error",
-        error instanceof Error ? error.message : "No se pudo finalizar la visita",
-      );
+      logError("VisitsScreen/checkout", error);
+      showError(error, "Error al finalizar visita");
     } finally {
       setCheckingOutVisitId(null);
     }
   };
 
-  const renderAttachment = (visit: VisitRecord, attachment: VisitAttachment) => (
+  const renderAttachment = (
+    visit: VisitRecord,
+    attachment: VisitAttachment,
+  ) => (
     <TouchableOpacity
       key={attachment.id}
       style={styles.attachmentCard}
@@ -1005,7 +1125,10 @@ export default function VisitsScreen() {
       }}
     >
       {attachment.attachment_kind === "image" ? (
-        <Image source={{ uri: attachment.signed_url }} style={styles.attachmentImage} />
+        <Image
+          source={{ uri: attachment.signed_url }}
+          style={styles.attachmentImage}
+        />
       ) : (
         <View style={styles.documentAttachment}>
           <Text style={styles.documentAttachmentIcon}>
@@ -1019,24 +1142,32 @@ export default function VisitsScreen() {
     </TouchableOpacity>
   );
 
-  const renderDraftAttachment = (attachment: DraftVisitAttachment, index: number) => (
-    <View key={`${attachment.file_name}-${index}`} style={styles.draftAttachmentRow}>
+  const renderDraftAttachment = (
+    attachment: DraftVisitAttachment,
+    index: number,
+  ) => (
+    <View
+      key={`${attachment.file_name}-${index}`}
+      style={styles.draftAttachmentRow}
+    >
       <View style={styles.draftAttachmentInfo}>
         <Text style={styles.draftAttachmentName} numberOfLines={1}>
           {attachment.file_name}
         </Text>
-        <Text style={styles.draftAttachmentHint}>Se sincroniza si estas offline</Text>
+        <Text style={styles.draftAttachmentHint}>
+          Se sincroniza si estas offline
+        </Text>
       </View>
-      <TouchableOpacity
-        onPress={() => removeDraftAttachmentAtIndex(index)}
-      >
+      <TouchableOpacity onPress={() => removeDraftAttachmentAtIndex(index)}>
         <Text style={styles.removeDraftAttachment}>Remover</Text>
       </TouchableOpacity>
     </View>
   );
 
   const removeDraftAttachmentAtIndex = (index: number) => {
-    setDraftAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index));
+    setDraftAttachments((current) =>
+      current.filter((_, currentIndex) => currentIndex !== index),
+    );
   };
 
   const renderVisit = ({ item }: { item: VisitRecord }) => {
@@ -1046,21 +1177,31 @@ export default function VisitsScreen() {
     );
 
     return (
-      <View style={[styles.visitCard, !item.check_out_at ? styles.visitCardActive : null]}>
+      <View
+        style={[
+          styles.visitCard,
+          !item.check_out_at ? styles.visitCardActive : null,
+        ]}
+      >
         <View style={styles.visitHeader}>
           <Text style={styles.visitClient}>{item.client_name}</Text>
           {item.check_out_at ? (
             <View style={[styles.badge, styles.badgeDone]}>
-              <Text style={[styles.badgeText, styles.badgeTextDone]}>Completada</Text>
+              <Text style={[styles.badgeText, styles.badgeTextDone]}>
+                Completada
+              </Text>
             </View>
           ) : (
             <View style={[styles.badge, styles.badgePending]}>
-              <Text style={[styles.badgeText, styles.badgeTextPending]}>En curso</Text>
+              <Text style={[styles.badgeText, styles.badgeTextPending]}>
+                En curso
+              </Text>
             </View>
           )}
         </View>
         <Text style={styles.visitMeta}>
-          {item.visit_type} • {format(new Date(item.check_in_at), "dd MMM HH:mm", { locale: es })}
+          {item.visit_type} •{" "}
+          {format(new Date(item.check_in_at), "dd MMM HH:mm", { locale: es })}
         </Text>
         {pendingSyncVisitIds[item.id] || item.queued ? (
           <View style={styles.syncBadge}>
@@ -1069,10 +1210,14 @@ export default function VisitsScreen() {
         ) : null}
         {pendingCheckoutVisitIds[item.id] || item.pending_checkout ? (
           <View style={styles.syncBadgeInfo}>
-            <Text style={styles.syncBadgeInfoText}>Checkout pendiente de sync</Text>
+            <Text style={styles.syncBadgeInfoText}>
+              Checkout pendiente de sync
+            </Text>
           </View>
         ) : null}
-        {item.notes ? <Text style={styles.visitNotes}>{item.notes}</Text> : null}
+        {item.notes ? (
+          <Text style={styles.visitNotes}>{item.notes}</Text>
+        ) : null}
         <View style={styles.visitCounts}>
           <Text style={styles.countText}>Fotos: {item.photos_count || 0}</Text>
           <Text style={styles.countText}>Docs: {docsCount}</Text>
@@ -1080,7 +1225,8 @@ export default function VisitsScreen() {
         {pendingAttachmentCountByVisit[item.id] ? (
           <View style={styles.pendingSyncBadge}>
             <Text style={styles.pendingSyncBadgeText}>
-              {pendingAttachmentCountByVisit[item.id]} anexo(s) pendente(s) de sync
+              {pendingAttachmentCountByVisit[item.id]} anexo(s) pendente(s) de
+              sync
             </Text>
           </View>
         ) : null}
@@ -1104,7 +1250,9 @@ export default function VisitsScreen() {
               disabled={checkingOutVisitId === item.id}
             >
               <Text style={styles.primaryButtonText}>
-                {checkingOutVisitId === item.id ? "Finalizando..." : "Encerrar visita"}
+                {checkingOutVisitId === item.id
+                  ? "Finalizando..."
+                  : "Encerrar visita"}
               </Text>
             </TouchableOpacity>
           ) : null}
@@ -1127,13 +1275,21 @@ export default function VisitsScreen() {
             disabled={loadingAttachmentsByVisit[item.id]}
           >
             <Text style={styles.secondaryButtonText}>
-              {loadingAttachmentsByVisit[item.id] ? "Cargando..." : "Ver anexos"}
+              {loadingAttachmentsByVisit[item.id]
+                ? "Cargando..."
+                : "Ver anexos"}
             </Text>
           </TouchableOpacity>
         </View>
         {attachmentsByVisit[item.id]?.length ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.attachmentsRow}>
-            {attachmentsByVisit[item.id].map((attachment) => renderAttachment(item, attachment))}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.attachmentsRow}
+          >
+            {attachmentsByVisit[item.id].map((attachment) =>
+              renderAttachment(item, attachment),
+            )}
           </ScrollView>
         ) : null}
       </View>
@@ -1144,7 +1300,10 @@ export default function VisitsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
-          style={[styles.periodBtn, period === "today" && styles.periodBtnActive]}
+          style={[
+            styles.periodBtn,
+            period === "today" && styles.periodBtnActive,
+          ]}
           onPress={() => setPeriod("today")}
         >
           <Text
@@ -1157,7 +1316,10 @@ export default function VisitsScreen() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.periodBtn, period === "week" && styles.periodBtnActive]}
+          style={[
+            styles.periodBtn,
+            period === "week" && styles.periodBtnActive,
+          ]}
           onPress={() => setPeriod("week")}
         >
           <Text
@@ -1206,13 +1368,22 @@ export default function VisitsScreen() {
         }}
         contentStyle={styles.modal}
       >
-        <TouchableOpacity style={styles.typeOption} onPress={() => void handleAttachmentAction("camera")}>
+        <TouchableOpacity
+          style={styles.typeOption}
+          onPress={() => void handleAttachmentAction("camera")}
+        >
           <Text style={styles.typeOptionText}>Tomar foto</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.typeOption} onPress={() => void handleAttachmentAction("gallery")}>
+        <TouchableOpacity
+          style={styles.typeOption}
+          onPress={() => void handleAttachmentAction("gallery")}
+        >
           <Text style={styles.typeOptionText}>Elegir foto de la galería</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.typeOption} onPress={() => void handleAttachmentAction("document")}>
+        <TouchableOpacity
+          style={styles.typeOption}
+          onPress={() => void handleAttachmentAction("document")}
+        >
           <Text style={styles.typeOptionText}>Adjuntar documento</Text>
         </TouchableOpacity>
       </BottomSheetModal>
@@ -1245,7 +1416,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: r.sm,
   },
-  addBtnText: { color: colors.primaryForeground, fontWeight: "600", fontSize: f.base },
+  addBtnText: {
+    color: colors.primaryForeground,
+    fontWeight: "600",
+    fontSize: f.base,
+  },
   loader: { marginTop: 32 },
   list: { padding: s.md, paddingBottom: 32 },
   empty: {
@@ -1268,9 +1443,22 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
-  visitHeader: { flexDirection: "row", justifyContent: "space-between", gap: s.sm },
-  visitClient: { fontSize: f.md, fontWeight: "600", color: colors.foreground, flex: 1 },
-  badge: { paddingHorizontal: s.sm, paddingVertical: s.xs, borderRadius: r.full },
+  visitHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: s.sm,
+  },
+  visitClient: {
+    fontSize: f.md,
+    fontWeight: "600",
+    color: colors.foreground,
+    flex: 1,
+  },
+  badge: {
+    paddingHorizontal: s.sm,
+    paddingVertical: s.xs,
+    borderRadius: r.full,
+  },
   badgeDone: { backgroundColor: colors.successMuted },
   badgePending: { backgroundColor: colors.infoMuted },
   badgeText: { fontSize: f.sm, fontWeight: "600" },
@@ -1339,7 +1527,11 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.card,
   },
-  secondaryButtonText: { fontSize: f.sm, color: colors.foreground, fontWeight: "600" },
+  secondaryButtonText: {
+    fontSize: f.sm,
+    color: colors.foreground,
+    fontWeight: "600",
+  },
   attachmentsRow: { marginTop: s.sm },
   attachmentCard: {
     width: 92,
@@ -1359,8 +1551,16 @@ const styles = StyleSheet.create({
     padding: s.sm,
     gap: s.sm,
   },
-  documentAttachmentIcon: { fontSize: f.sm, fontWeight: "700", color: colors.primary },
-  documentAttachmentName: { fontSize: f.sm, color: colors.foreground, textAlign: "center" },
+  documentAttachmentIcon: {
+    fontSize: f.sm,
+    fontWeight: "700",
+    color: colors.primary,
+  },
+  documentAttachmentName: {
+    fontSize: f.sm,
+    color: colors.foreground,
+    textAlign: "center",
+  },
   modal: {},
   label: { fontSize: f.base, fontWeight: "500", marginBottom: s.sm },
   selector: {
@@ -1398,10 +1598,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     marginBottom: s.sm,
   },
-  typeOptionActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  typeOptionText: { fontSize: f.base, color: colors.foreground, fontWeight: "600" },
+  typeOptionActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  typeOptionText: {
+    fontSize: f.base,
+    color: colors.foreground,
+    fontWeight: "600",
+  },
   typeOptionTextActive: { color: colors.primaryForeground },
-  emptyTypes: { textAlign: "center", color: colors.mutedForeground, marginTop: s.sm },
+  emptyTypes: {
+    textAlign: "center",
+    color: colors.mutedForeground,
+    marginTop: s.sm,
+  },
   clientModeRow: { flexDirection: "row", gap: s.sm, marginBottom: s.md },
   clientModeChip: {
     flex: 1,
@@ -1416,9 +1627,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  clientModeText: { fontSize: f.sm, color: colors.foreground, fontWeight: "600" },
+  clientModeText: {
+    fontSize: f.sm,
+    color: colors.foreground,
+    fontWeight: "600",
+  },
   clientModeTextActive: { color: colors.primaryForeground },
-  attachmentButtonsRow: { flexDirection: "row", flexWrap: "wrap", gap: s.sm, marginBottom: s.sm },
+  attachmentButtonsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: s.sm,
+    marginBottom: s.sm,
+  },
   draftAttachmentsList: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -1438,8 +1658,16 @@ const styles = StyleSheet.create({
     gap: s.xs,
   },
   draftAttachmentName: { flex: 1, fontSize: f.sm, color: colors.foreground },
-  draftAttachmentHint: { fontSize: f.xs, color: colors.primary, fontWeight: "600" },
-  removeDraftAttachment: { fontSize: f.sm, color: colors.destructive, fontWeight: "600" },
+  draftAttachmentHint: {
+    fontSize: f.xs,
+    color: colors.primary,
+    fontWeight: "600",
+  },
+  removeDraftAttachment: {
+    fontSize: f.sm,
+    color: colors.destructive,
+    fontWeight: "600",
+  },
   searchInput: {
     borderWidth: 1,
     borderColor: colors.border,

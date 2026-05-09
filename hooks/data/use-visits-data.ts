@@ -8,6 +8,9 @@ import {
 } from "../../lib/mobile-data";
 import { mobileQueryKeys } from "./query-keys";
 
+// Cache duration constants
+const CACHE_STALE_TIME = 60_000; // 1 minute
+
 export function useVisitsData(userId?: string, period: VisitPeriod = "week") {
   return useQuery({
     queryKey: userId
@@ -15,6 +18,8 @@ export function useVisitsData(userId?: string, period: VisitPeriod = "week") {
       : ["visits", "anonymous", period],
     queryFn: () => fetchVisits(userId!, period),
     enabled: !!userId,
+    staleTime: CACHE_STALE_TIME,
+    gcTime: 5 * 60_000,
   });
 }
 
@@ -23,6 +28,10 @@ export function useCreateVisit() {
 
   return useMutation({
     mutationFn: createVisit,
+    onError: (error, variables) => {
+      // Error is already handled with user-friendly message in the API call
+      console.error("[useCreateVisit] Error creating visit:", error);
+    },
     onSuccess: (result, variables) => {
       queryClient.setQueryData<VisitRecord[]>(
         mobileQueryKeys.visits(variables.userId, "today"),
@@ -31,7 +40,7 @@ export function useCreateVisit() {
             return current;
           }
           return [{ ...result.visit, queued: result.queued }, ...current];
-        }
+        },
       );
       queryClient.setQueryData<VisitRecord[]>(
         mobileQueryKeys.visits(variables.userId, "week"),
@@ -40,7 +49,7 @@ export function useCreateVisit() {
             return current;
           }
           return [{ ...result.visit, queued: result.queued }, ...current];
-        }
+        },
       );
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.dashboard(variables.userId),
@@ -54,6 +63,9 @@ export function useCheckoutVisit() {
 
   return useMutation({
     mutationFn: checkoutVisit,
+    onError: (error) => {
+      console.error("[useCheckoutVisit] Error checking out:", error);
+    },
     onSuccess: (result, variables) => {
       const applyVisitUpdate = (current: VisitRecord[] = []) =>
         current.map((item) =>

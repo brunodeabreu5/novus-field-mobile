@@ -42,7 +42,7 @@ interface CachedTrackingLocation {
 
 function haversineDistanceMeters(
   from: { latitude: number; longitude: number },
-  to: { latitude: number; longitude: number }
+  to: { latitude: number; longitude: number },
 ) {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const earthRadiusM = 6_371_000;
@@ -71,7 +71,7 @@ export function getLastLocationCacheKey(vendorId: string) {
 
 function isCachedTrackingLocation(
   value: unknown,
-  vendorId: string
+  vendorId: string,
 ): value is CachedTrackingLocation {
   if (!value || typeof value !== "object") {
     return false;
@@ -92,9 +92,11 @@ function isCachedTrackingLocation(
 function buildIdleSnapshot(
   vendorId: string,
   loc: Location.LocationObject,
-  forceFreshTimestamp = false
+  forceFreshTimestamp = false,
 ) {
-  const timestampMs = forceFreshTimestamp ? Date.now() : loc.timestamp ?? Date.now();
+  const timestampMs = forceFreshTimestamp
+    ? Date.now()
+    : (loc.timestamp ?? Date.now());
   const snapshot = {
     vendorId,
     latitude: loc.coords.latitude,
@@ -131,14 +133,16 @@ function calculateIdleState(
   vendorId: string,
   loc: Location.LocationObject,
   lastLocationRaw: string | null,
-  timestampMs: number
+  timestampMs: number,
 ) {
   let isIdle = false;
   let idleDurationSeconds: number | null = null;
 
   if (lastLocationRaw !== null) {
     try {
-      const previous = JSON.parse(lastLocationRaw) as Partial<CachedTrackingLocation>;
+      const previous = JSON.parse(
+        lastLocationRaw,
+      ) as Partial<CachedTrackingLocation>;
       if (
         previous.vendorId !== vendorId ||
         typeof previous.latitude !== "number" ||
@@ -150,11 +154,11 @@ function calculateIdleState(
 
       const distance = haversineDistanceMeters(
         { latitude: previous.latitude, longitude: previous.longitude },
-        { latitude: loc.coords.latitude, longitude: loc.coords.longitude }
+        { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
       );
       const elapsedSeconds = Math.max(
         0,
-        Math.round((timestampMs - previous.timestamp) / 1000)
+        Math.round((timestampMs - previous.timestamp) / 1000),
       );
 
       if (distance < TRACKING_MIN_DISPLACEMENT_M) {
@@ -171,7 +175,9 @@ function calculateIdleState(
 
 async function loadCachedLocation(vendorId: string, cacheMaxAgeMs: number) {
   try {
-    const cachedRaw = await AsyncStorage.getItem(getLastLocationCacheKey(vendorId));
+    const cachedRaw = await AsyncStorage.getItem(
+      getLastLocationCacheKey(vendorId),
+    );
     if (!cachedRaw) {
       return null;
     }
@@ -194,7 +200,7 @@ async function loadCachedLocation(vendorId: string, cacheMaxAgeMs: number) {
 
 export async function resolveCurrentLocation(
   vendorId: string,
-  cacheMaxAgeMs: number
+  cacheMaxAgeMs: number,
 ) {
   const lastKnown = await getFreshLastKnownPosition({
     maxAgeMs: TRACKING_LOCATION_MAX_AGE_MS,
@@ -215,7 +221,7 @@ export async function resolveCurrentLocation(
 export async function normalizeTrackingLocation(
   vendorId: string,
   location: Location.LocationObject,
-  cacheMaxAgeMs: number
+  cacheMaxAgeMs: number,
 ) {
   if (isFreshLocation(location, TRACKING_LOCATION_MAX_AGE_MS)) {
     return { location, forceTimestamp: false };
@@ -262,7 +268,7 @@ async function persistVendorPositionInOfflineQueue(
     isIdle: boolean;
     idleDurationSeconds: number | null;
     recordedAt: string;
-  }
+  },
 ) {
   await offlineStorage.enqueue({
     type: "vendor_position",
@@ -284,7 +290,10 @@ export async function flushQueuedTrackingPositions(reason: string) {
   try {
     const synced = await syncQueuedTrackingActions();
     if (synced > 0) {
-      logger.info("Tracking", `Flushed ${synced} queued tracking position(s) after ${reason}`);
+      logger.info(
+        "Tracking",
+        `Flushed ${synced} queued tracking position(s) after ${reason}`,
+      );
     }
   } catch (error) {
     if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
@@ -303,30 +312,33 @@ export async function publishTrackingHeartbeat(
     trackingMode: TrackingStatusMode;
     lastPositionAt?: string | null;
     lastError?: string | null;
-  }
+  },
 ) {
-  await backendApi.post("/tracking/status", {
-    vendor_id: vendorId,
-    tracking_mode: payload.trackingMode,
-    last_heartbeat_at: new Date().toISOString(),
-    last_position_at: payload.lastPositionAt ?? null,
-    last_error: payload.lastError ?? null,
-  }).catch((error) => {
-    if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
-      logger.warn(
-        "Tracking", "Heartbeat update failed:",
-        error instanceof Error ? error.message : error,
-      );
-    }
-    return null;
-  });
+  await backendApi
+    .post("/tracking/status", {
+      vendor_id: vendorId,
+      tracking_mode: payload.trackingMode,
+      last_heartbeat_at: new Date().toISOString(),
+      last_position_at: payload.lastPositionAt ?? null,
+      last_error: payload.lastError ?? null,
+    })
+    .catch((error) => {
+      if (!isOfflineLikeError(error) && !isExpectedAuthError(error)) {
+        logger.warn(
+          "Tracking",
+          "Heartbeat update failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+      return null;
+    });
 }
 
 export async function persistPosition(
   vendorId: string,
   loc: Location.LocationObject,
   options: TrackingPersistenceOptions,
-  cacheMaxAgeMs: number
+  cacheMaxAgeMs: number,
 ) {
   if (!isValidLocation(loc)) {
     throw new Error("Invalid GPS location");
@@ -335,27 +347,53 @@ export async function persistPosition(
   const { snapshot: lastLocationSnapshot, timestampMs } = buildIdleSnapshot(
     vendorId,
     loc,
-    options.force === true || !isFreshLocation(loc, TRACKING_LOCATION_MAX_AGE_MS)
+    options.force === true ||
+      !isFreshLocation(loc, TRACKING_LOCATION_MAX_AGE_MS),
   );
   const timestampIso = new Date(timestampMs).toISOString();
-  const lastLocationRaw = await AsyncStorage.getItem(getLastLocationCacheKey(vendorId));
+  const lastLocationRaw = await AsyncStorage.getItem(
+    getLastLocationCacheKey(vendorId),
+  );
   const { isIdle, idleDurationSeconds } = calculateIdleState(
     vendorId,
     loc,
     lastLocationRaw,
-    timestampMs
+    timestampMs,
   );
+
+  // Calculate distance from last position
+  let distanceMeters: number | null = null;
+  if (lastLocationRaw) {
+    try {
+      const previous = JSON.parse(
+        lastLocationRaw,
+      ) as Partial<CachedTrackingLocation>;
+      if (
+        previous.vendorId === vendorId &&
+        typeof previous.latitude === "number" &&
+        typeof previous.longitude === "number"
+      ) {
+        distanceMeters = haversineDistanceMeters(
+          { latitude: previous.latitude, longitude: previous.longitude },
+          { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+        );
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }
 
   try {
     await AsyncStorage.setItem(
       getLastLocationCacheKey(vendorId),
-      JSON.stringify(lastLocationSnapshot)
+      JSON.stringify(lastLocationSnapshot),
     );
     await AsyncStorage.removeItem(TRACKING_LAST_LOCATION_KEY);
   } catch (storageError) {
     logger.warn(
-      "Tracking", "Failed to persist last location cache:",
-      storageError instanceof Error ? storageError.message : storageError
+      "Tracking",
+      "Failed to persist last location cache:",
+      storageError instanceof Error ? storageError.message : storageError,
     );
   }
 
@@ -368,6 +406,7 @@ export async function persistPosition(
     heading: loc.coords.heading ?? null,
     idle_duration_seconds: idleDurationSeconds,
     is_idle: isIdle,
+    distance_meters: distanceMeters,
     recorded_at: timestampIso,
   };
 
@@ -384,18 +423,24 @@ export async function persistPosition(
       recorded_at: payload.recorded_at,
     });
   } catch (error) {
+    // For auth errors (including background mode), queue the position for later sync
+    // This ensures tracking continues even when the session is unavailable
     if (isExpectedAuthError(error)) {
-      if (
-        options.trackingMode === "background" &&
-        error instanceof Error &&
-        error.message.trim().toLowerCase() === "no active backend session"
-      ) {
-        logger.warn(
-          "Tracking",
-          "Posição em background não enviada: sessão/token indisponível (ex.: dispositivo bloqueado com SecureStore AFTER_FIRST_UNLOCK, ou sessão expirada).",
-        );
-      }
-      throw error;
+      logger.warn(
+        "Tracking",
+        `Auth error in ${options.trackingMode} mode - queuing position for later sync`,
+      );
+      await persistVendorPositionInOfflineQueue(vendorId, {
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        accuracyMeters: payload.accuracy_meters,
+        speedKmh: payload.speed_kmh,
+        heading: payload.heading,
+        isIdle: payload.is_idle,
+        idleDurationSeconds: payload.idle_duration_seconds,
+        recordedAt: payload.recorded_at,
+      });
+      return;
     }
 
     if (isOfflineLikeError(error)) {
@@ -412,7 +457,9 @@ export async function persistPosition(
       return;
     }
 
-    throw new Error(error instanceof Error ? error.message : "Tracking persistence failed");
+    throw new Error(
+      error instanceof Error ? error.message : "Tracking persistence failed",
+    );
   }
 
   publishTrackingHeartbeat(vendorId, {
@@ -426,21 +473,29 @@ export async function persistPosition(
 export async function processBackgroundLocationBatch(
   vendorId: string,
   locations: Location.LocationObject[],
-  cacheMaxAgeMs: number
+  cacheMaxAgeMs: number,
 ) {
   const geofenceVendorName = await getStoredGeofenceVendorName();
 
   if (locations.length === 0) {
-    const fallbackLocation = await resolveCurrentLocation(vendorId, cacheMaxAgeMs);
+    const fallbackLocation = await resolveCurrentLocation(
+      vendorId,
+      cacheMaxAgeMs,
+    );
     if (!fallbackLocation) {
       return;
     }
 
     try {
-      await persistPosition(vendorId, fallbackLocation, {
-        force: true,
-        trackingMode: "background",
-      }, cacheMaxAgeMs);
+      await persistPosition(
+        vendorId,
+        fallbackLocation,
+        {
+          force: true,
+          trackingMode: "background",
+        },
+        cacheMaxAgeMs,
+      );
       await processGeofencePositionInBackground({
         position: {
           lat: fallbackLocation.coords.latitude,
@@ -456,8 +511,9 @@ export async function processBackgroundLocationBatch(
       }
 
       logger.warn(
-        "Tracking", "Background fallback position failed:",
-        getUnknownErrorMessage(insertError)
+        "Tracking",
+        "Background fallback position failed:",
+        getUnknownErrorMessage(insertError),
       );
     }
 
@@ -465,17 +521,26 @@ export async function processBackgroundLocationBatch(
   }
 
   for (const location of locations) {
-    const normalized = await normalizeTrackingLocation(vendorId, location, cacheMaxAgeMs);
+    const normalized = await normalizeTrackingLocation(
+      vendorId,
+      location,
+      cacheMaxAgeMs,
+    );
     if (!normalized) {
       logger.warn("Tracking", "Ignored invalid background location payload");
       continue;
     }
 
     try {
-      await persistPosition(vendorId, normalized.location, {
-        force: normalized.forceTimestamp,
-        trackingMode: "background",
-      }, cacheMaxAgeMs);
+      await persistPosition(
+        vendorId,
+        normalized.location,
+        {
+          force: normalized.forceTimestamp,
+          trackingMode: "background",
+        },
+        cacheMaxAgeMs,
+      );
       await processGeofencePositionInBackground({
         position: {
           lat: normalized.location.coords.latitude,
@@ -491,8 +556,9 @@ export async function processBackgroundLocationBatch(
       }
 
       logger.warn(
-        "Tracking", "Background position failed:",
-        getUnknownErrorMessage(insertError)
+        "Tracking",
+        "Background position failed:",
+        getUnknownErrorMessage(insertError),
       );
     }
   }

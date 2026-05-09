@@ -3,28 +3,6 @@ require File.join(File.dirname(`node --print "require.resolve('react-native/pack
 
 require 'json'
 podfile_properties = JSON.parse(File.read(File.join(__dir__, 'Podfile.properties.json'))) rescue {}
-ENV['PATH'] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", ENV['PATH']].compact.join(':')
-
-def patch_react_native_head_command!
-  react_native_root = File.join(__dir__, '..', 'node_modules', 'react-native')
-  files = [
-    File.join(react_native_root, 'third-party-podspecs', 'ReactNativeDependencies.podspec'),
-    File.join(react_native_root, 'sdks', 'hermes-engine', 'utils', 'build-hermes-xcode.sh'),
-    File.join(react_native_root, 'sdks', 'hermes-engine', 'utils', 'build-apple-framework.sh'),
-  ]
-
-  files.each do |path|
-    next unless File.exist?(path)
-
-    content = File.read(path)
-    patched = content.gsub('| head -n 1', '| /usr/bin/head -n 1')
-    next if patched == content
-
-    File.write(path, patched)
-  end
-end
-
-patch_react_native_head_command!
 
 def ccache_enabled?(podfile_properties)
   # Environment variable takes precedence

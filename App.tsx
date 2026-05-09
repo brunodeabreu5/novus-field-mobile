@@ -1,5 +1,6 @@
 import React from "react";
 import { StatusBar } from "expo-status-bar";
+
 import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { TenantProvider, useTenant } from "./contexts/TenantContext";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import GlobalSyncIndicator from "./components/GlobalSyncIndicator";
 import { ChatPresenceProvider } from "./providers/ChatPresenceProvider";
+import { ChatSocketProvider } from "./providers/ChatSocketProvider";
 import { TrackingProvider } from "./providers/TrackingProvider";
 import RootNavigator from "./navigation/RootNavigator";
 import { colors } from "./theme/colors";
@@ -33,7 +35,14 @@ function TenantBootstrapGate() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: colors.background,
+        }}
+      >
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
@@ -45,9 +54,11 @@ function TenantBootstrapGate() {
         <MenuProvider>
           <TrackingProvider>
             <ChatPresenceProvider>
-              <ThemeProvider>
-                <ThemedApp />
-              </ThemeProvider>
+              <ChatSocketProvider>
+                <ThemeProvider>
+                  <ThemedApp />
+                </ThemeProvider>
+              </ChatSocketProvider>
             </ChatPresenceProvider>
           </TrackingProvider>
         </MenuProvider>

@@ -19,6 +19,9 @@ import {
 import { generateId } from "../../lib/ids";
 import { mobileQueryKeys } from "./query-keys";
 
+// Cache duration constants
+const CACHE_STALE_TIME = 30_000; // 30 seconds
+
 function appendMessageToInfiniteData(
   current: InfiniteData<ChatMessagesPage> | undefined,
   message: ChatMessage,
@@ -30,7 +33,11 @@ function appendMessageToInfiniteData(
     };
   }
 
-  if (current.pages.some((page) => page.items.some((item) => item.id === message.id))) {
+  if (
+    current.pages.some((page) =>
+      page.items.some((item) => item.id === message.id),
+    )
+  ) {
     return current;
   }
 
@@ -58,7 +65,9 @@ function upsertMessageInInfiniteData(
     };
   }
 
-  const exists = current.pages.some((page) => page.items.some((item) => item.id === message.id));
+  const exists = current.pages.some((page) =>
+    page.items.some((item) => item.id === message.id),
+  );
   if (!exists) {
     return appendMessageToInfiniteData(current, message);
   }
@@ -79,7 +88,9 @@ function updateMessageInInfiniteData(
     ...current,
     pages: current.pages.map((page) => ({
       ...page,
-      items: page.items.map((item) => (item.id === messageId ? updater(item) : item)),
+      items: page.items.map((item) =>
+        item.id === messageId ? updater(item) : item,
+      ),
     })),
   };
 }
@@ -91,6 +102,8 @@ export function useContactsData(userId?: string, canSeePresence = false) {
       : ["contacts", "anonymous", canSeePresence],
     queryFn: () => fetchContacts(userId!, canSeePresence),
     enabled: !!userId,
+    staleTime: CACHE_STALE_TIME,
+    gcTime: 2 * 60_000,
     refetchInterval: 30000,
   });
 }
@@ -103,7 +116,11 @@ export function useMessagesData(userId?: string, otherUserId?: string) {
         : ["messages", "anonymous"],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) =>
-      fetchMessagesPage({ userId: userId!, otherUserId: otherUserId!, cursor: pageParam }),
+      fetchMessagesPage({
+        userId: userId!,
+        otherUserId: otherUserId!,
+        cursor: pageParam,
+      }),
     enabled: !!userId && !!otherUserId,
     refetchInterval: 5000,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
@@ -134,7 +151,10 @@ export function useSendChatMessage() {
       };
 
       await queryClient.cancelQueries({
-        queryKey: mobileQueryKeys.messages(variables.senderId, variables.receiverId),
+        queryKey: mobileQueryKeys.messages(
+          variables.senderId,
+          variables.receiverId,
+        ),
       });
 
       queryClient.setQueryData<InfiniteData<ChatMessagesPage>>(
@@ -149,11 +169,15 @@ export function useSendChatMessage() {
         mobileQueryKeys.messages(message.sender_id, message.receiver_id),
         (current) => {
           const withoutOptimistic = context?.optimisticMessage
-            ? updateMessageInInfiniteData(current, context.optimisticMessage.id, () => ({
-                ...message,
-                deliveryStatus: message.queued ? "queued" : "sent",
-                retryPayload: context.optimisticMessage.retryPayload,
-              }))
+            ? updateMessageInInfiniteData(
+                current,
+                context.optimisticMessage.id,
+                () => ({
+                  ...message,
+                  deliveryStatus: message.queued ? "queued" : "sent",
+                  retryPayload: context.optimisticMessage.retryPayload,
+                }),
+              )
             : current;
 
           if (context?.optimisticMessage && withoutOptimistic !== current) {
@@ -165,7 +189,7 @@ export function useSendChatMessage() {
             deliveryStatus: message.queued ? "queued" : "sent",
             retryPayload: context?.optimisticMessage?.retryPayload,
           });
-        }
+        },
       );
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.contacts(message.sender_id),
@@ -182,11 +206,15 @@ export function useSendChatMessage() {
       queryClient.setQueryData<InfiniteData<ChatMessagesPage>>(
         mobileQueryKeys.messages(variables.senderId, variables.receiverId),
         (current) =>
-          updateMessageInInfiniteData(current, context.optimisticMessage.id, (message) => ({
-            ...message,
-            deliveryStatus: "failed",
-            retryPayload: context.optimisticMessage.retryPayload,
-          })),
+          updateMessageInInfiniteData(
+            current,
+            context.optimisticMessage.id,
+            (message) => ({
+              ...message,
+              deliveryStatus: "failed",
+              retryPayload: context.optimisticMessage.retryPayload,
+            }),
+          ),
       );
     },
   });
@@ -208,7 +236,10 @@ export function useMarkConversationAsRead() {
         queryKey: mobileQueryKeys.contacts(variables.userId),
       });
       queryClient.invalidateQueries({
-        queryKey: mobileQueryKeys.messages(variables.userId, variables.otherUserId),
+        queryKey: mobileQueryKeys.messages(
+          variables.userId,
+          variables.otherUserId,
+        ),
       });
     },
   });

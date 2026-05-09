@@ -51,12 +51,10 @@ export const chargeSchema = z.object({
       const num = Number(val.replace(/\D/g, ""));
       return num > 0;
     }, "Monto debe ser mayor a 0"),
-  dueDate: z
-    .string()
-    .refine((val) => {
-      if (!val) return true;
-      return /^\d{4}-\d{2}-\d{2}$/.test(val);
-    }, "Fecha inválida (YYYY-MM-DD)"),
+  dueDate: z.string().refine((val) => {
+    if (!val) return true;
+    return /^\d{4}-\d{2}-\d{2}$/.test(val);
+  }, "Fecha inválida (YYYY-MM-DD)"),
   notes: z.string().max(1000),
 });
 
@@ -64,6 +62,7 @@ export const visitSchema = z.object({
   clientId: z.string(),
   clientName: z.string().min(1, "El cliente es obligatorio"),
   visitType: z.string().min(1, "El tipo de visita es obligatorio"),
+  amount: z.string().optional(),
   notes: z.string().max(1000),
 });
 

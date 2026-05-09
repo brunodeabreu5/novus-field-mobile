@@ -1,4 +1,8 @@
-import { asItemsArray, backendApi, type CollectionResponse } from "./backend-api";
+import {
+  asItemsArray,
+  backendApi,
+  type CollectionResponse,
+} from "./backend-api";
 import * as FileSystem from "expo-file-system/legacy";
 import { logger } from "./logger";
 import {
@@ -17,6 +21,23 @@ import {
   type VisitAttachmentUploadAction,
   type VisitCreateAction,
 } from "./offline-storage";
+
+// Priority levels: lower number = higher priority
+const ACTION_PRIORITY: Record<QueuedAction["type"], number> = {
+  vendor_position: 1, // GPS tracking - highest priority
+  check_in: 2,
+  check_out: 2,
+  visit_create: 3,
+  manual_visit_create: 3,
+  client_create: 4,
+  client_update: 4,
+  charge_create: 5,
+  chat_send: 6,
+  visit_attachment_upload: 7,
+};
+
+// Maximum positions to send in a single batch request
+const TRACKING_BATCH_SIZE = 50;
 
 interface SyncQueuedActionsOptions {
   allowedTypes?: QueuedAction["type"][];
@@ -38,16 +59,17 @@ async function deleteLocalFileIfExists(uri: string) {
 
 async function fetchDefaultVisitTypeName() {
   try {
-    const data = await backendApi.get<Array<{ name: string; is_default: boolean }>>(
-      "/visit-types?activeOnly=true",
-    );
+    const data = await backendApi.get<
+      Array<{ name: string; is_default: boolean }>
+    >("/visit-types?activeOnly=true");
     const defaultItem = data.find((item) => item.is_default);
     if (defaultItem?.name) {
       return defaultItem.name;
     }
   } catch (error) {
     logger.warn(
-      "Sync", "Failed to load default visit type:",
+      "Sync",
+      "Failed to load default visit type:",
       error instanceof Error ? error.message : String(error),
     );
   }
@@ -79,14 +101,24 @@ export async function syncQueuedActions(
   }
 }
 
-async function runQueuedSync(options?: SyncQueuedActionsOptions): Promise<number> {
+async function runQueuedSync(
+  options?: SyncQueuedActionsOptions,
+): Promise<number> {
   const queue = await offlineStorage.getQueue();
-  const filteredQueue = queue.filter((action) => {
-    if (options?.allowedTypes?.length && !options.allowedTypes.includes(action.type)) {
+
+  // Filter by options first
+  let filteredQueue = queue.filter((action) => {
+    if (
+      options?.allowedTypes?.length &&
+      !options.allowedTypes.includes(action.type)
+    ) {
       return false;
     }
 
-    if (options?.allowedIds?.length && !options.allowedIds.includes(action.id)) {
+    if (
+      options?.allowedIds?.length &&
+      !options.allowedIds.includes(action.id)
+    ) {
       return false;
     }
 
@@ -95,10 +127,71 @@ async function runQueuedSync(options?: SyncQueuedActionsOptions): Promise<number
 
   if (filteredQueue.length === 0) return 0;
 
+  // Sort by priority (lower number = higher priority)
+  filteredQueue.sort((a, b) => {
+    const priorityA = ACTION_PRIORITY[a.type] ?? 999;
+    const priorityB = ACTION_PRIORITY[b.type] ?? 999;
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+    // If same priority, older items first
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+
   let synced = 0;
   const errors: string[] = [];
 
-  for (const action of filteredQueue) {
+  // Process tracking positions in batch
+  const trackingActions = filteredQueue.filter(
+    (a): a is VendorPositionAction => a.type === "vendor_position",
+  );
+  const nonTrackingActions = filteredQueue.filter(
+    (a) => a.type !== "vendor_position",
+  );
+
+  // Batch process tracking positions
+  if (trackingActions.length > 0) {
+    try {
+      const batchSynced = await syncTrackingBatch(trackingActions);
+      synced += batchSynced;
+
+      // Remove synced tracking actions
+      for (const action of trackingActions.slice(0, batchSynced)) {
+        await offlineStorage.removeFromQueue(action.id);
+      }
+
+      // Mark remaining as failed
+      for (const action of trackingActions.slice(batchSynced)) {
+        await offlineStorage.incrementRetries(action.id);
+      }
+    } catch (err) {
+      logger.warn(
+        "Sync",
+        "Batch tracking error:",
+        err instanceof Error ? err.message : err,
+      );
+      // Fall back to individual processing
+      for (const action of trackingActions) {
+        try {
+          const wasSynced = await syncAction(action);
+          if (wasSynced) {
+            await offlineStorage.removeFromQueue(action.id);
+            synced++;
+          } else {
+            await offlineStorage.incrementRetries(action.id);
+          }
+        } catch (actionErr) {
+          await offlineStorage.incrementRetries(action.id);
+          errors.push(
+            `vendor_position: ${actionErr instanceof Error ? actionErr.message : actionErr}`,
+          );
+        }
+      }
+    }
+  }
+
+  // Process non-tracking actions individually
+  for (const action of nonTrackingActions) {
     try {
       const wasSynced = await syncAction(action);
       if (!wasSynced) {
@@ -110,7 +203,9 @@ async function runQueuedSync(options?: SyncQueuedActionsOptions): Promise<number
       synced++;
     } catch (err) {
       await offlineStorage.incrementRetries(action.id);
-      errors.push(`${action.type}: ${err instanceof Error ? err.message : err}`);
+      errors.push(
+        `${action.type}: ${err instanceof Error ? err.message : err}`,
+      );
     }
   }
 
@@ -119,6 +214,45 @@ async function runQueuedSync(options?: SyncQueuedActionsOptions): Promise<number
   }
 
   return synced;
+}
+
+// Batch process tracking positions for efficiency
+async function syncTrackingBatch(
+  actions: VendorPositionAction[],
+): Promise<number> {
+  if (actions.length === 0) return 0;
+
+  // Take only the batch size
+  const batch = actions.slice(0, TRACKING_BATCH_SIZE);
+
+  const positions = batch.map((action) => ({
+    latitude: action.payload.latitude,
+    longitude: action.payload.longitude,
+    accuracy_meters: action.payload.accuracyMeters,
+    speed_kmh: action.payload.speedKmh,
+    heading: action.payload.heading,
+    is_idle: action.payload.isIdle,
+    idle_duration_seconds: action.payload.idleDurationSeconds,
+    recorded_at: action.payload.recordedAt,
+  }));
+
+  try {
+    const result = await backendApi.post<{ created: number }>(
+      "/tracking/positions/batch",
+      {
+        positions,
+      },
+    );
+    return result.created;
+  } catch (error) {
+    // If batch fails, try individual sync
+    logger.warn(
+      "Sync",
+      "Batch tracking failed, falling back to individual:",
+      error instanceof Error ? error.message : error,
+    );
+    throw error;
+  }
 }
 
 export function syncQueuedTrackingActions() {
@@ -249,10 +383,12 @@ async function fetchCharge(chargeId: string) {
 
 async function fetchChatMessage(messageId: string, otherUserId: string) {
   try {
-    const messages = await backendApi.get<CollectionResponse<{ id: string }> | { items: { id: string }[] }>(
-      `/chat/messages?otherUserId=${encodeURIComponent(otherUserId)}`,
+    const messages = await backendApi.get<
+      CollectionResponse<{ id: string }> | { items: { id: string }[] }
+    >(`/chat/messages?otherUserId=${encodeURIComponent(otherUserId)}`);
+    const known = asItemsArray(messages).find(
+      (message) => message.id === messageId,
     );
-    const known = asItemsArray(messages).find((message) => message.id === messageId);
     return known ?? null;
   } catch {
     return null;
@@ -317,7 +453,9 @@ async function syncVisitCreate(action: VisitCreateAction): Promise<void> {
   });
 }
 
-async function syncManualVisitCreate(action: ManualVisitCreateAction): Promise<void> {
+async function syncManualVisitCreate(
+  action: ManualVisitCreateAction,
+): Promise<void> {
   const { payload } = action;
   const existing = await fetchVisit(payload.visitId);
 
@@ -331,6 +469,7 @@ async function syncManualVisitCreate(action: ManualVisitCreateAction): Promise<v
     timestamp: payload.timestamp,
     notes: payload.notes,
     visitType: payload.visitType ?? undefined,
+    amount: payload.amount,
   });
 
   if (created.id !== payload.visitId) {
@@ -400,7 +539,10 @@ async function syncChargeCreate(action: ChargeCreateAction): Promise<void> {
 
 async function syncChatSend(action: ChatSendAction): Promise<void> {
   const { payload } = action;
-  const existing = await fetchChatMessage(payload.messageId, payload.receiverId);
+  const existing = await fetchChatMessage(
+    payload.messageId,
+    payload.receiverId,
+  );
 
   if (existing) {
     return;
@@ -408,7 +550,9 @@ async function syncChatSend(action: ChatSendAction): Promise<void> {
 
   const attachments =
     payload.attachments.length > 0
-      ? await Promise.all(payload.attachments.map(uploadChatAttachmentFromQueue))
+      ? await Promise.all(
+          payload.attachments.map(uploadChatAttachmentFromQueue),
+        )
       : [];
 
   await backendApi.post("/chat/messages", {
@@ -436,13 +580,19 @@ async function syncVendorPosition(action: VendorPositionAction): Promise<void> {
   });
 }
 
-async function syncVisitAttachmentUpload(action: VisitAttachmentUploadAction): Promise<void> {
+async function syncVisitAttachmentUpload(
+  action: VisitAttachmentUploadAction,
+): Promise<void> {
   const { payload } = action;
   const resolvedVisitId = await resolveRemoteVisitId(payload.visitId);
   const existing = await fetchVisit(resolvedVisitId);
 
   if (!existing) {
-    logger.warn("Sync", "Visit not found for attachment upload:", payload.visitId);
+    logger.warn(
+      "Sync",
+      "Visit not found for attachment upload:",
+      payload.visitId,
+    );
     throw new SyncNotFoundError(payload.visitId);
   }
 
@@ -456,7 +606,11 @@ async function syncVisitAttachmentUpload(action: VisitAttachmentUploadAction): P
     attachment_kind: payload.attachmentKind,
   });
 
-  await uploadFileFromUri(payload.localUri, uploadTarget.upload_url, payload.mimeType);
+  await uploadFileFromUri(
+    payload.localUri,
+    uploadTarget.upload_url,
+    payload.mimeType,
+  );
 
   await backendApi.post(`/visits/${resolvedVisitId}/attachments`, {
     id: payload.attachmentId,
@@ -490,7 +644,9 @@ async function uploadFileFromUri(
   }
 }
 
-async function uploadChatAttachmentFromQueue(attachment: QueuedChatAttachmentPayload) {
+async function uploadChatAttachmentFromQueue(
+  attachment: QueuedChatAttachmentPayload,
+) {
   const uploadTarget = await backendApi.post<{
     storage_path: string;
     upload_url: string;
@@ -499,7 +655,11 @@ async function uploadChatAttachmentFromQueue(attachment: QueuedChatAttachmentPay
     mime_type: attachment.mimeType,
   });
 
-  await uploadFileFromUri(attachment.localUri, uploadTarget.upload_url, attachment.mimeType);
+  await uploadFileFromUri(
+    attachment.localUri,
+    uploadTarget.upload_url,
+    attachment.mimeType,
+  );
 
   return {
     id: attachment.attachmentId,
@@ -518,6 +678,7 @@ async function postVisit(input: {
   timestamp: string;
   visitType?: string;
   notes?: string | null;
+  amount?: number | null;
   latitude?: number;
   longitude?: number;
 }) {
@@ -526,6 +687,7 @@ async function postVisit(input: {
     client_name: input.clientName,
     notes: input.notes,
     visit_type: input.visitType,
+    amount: input.amount,
     check_in_at: input.timestamp,
     check_in_lat: input.latitude,
     check_in_lng: input.longitude,

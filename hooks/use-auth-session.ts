@@ -16,7 +16,7 @@ import {
   subscribeAuth,
 } from "../lib/backend-auth";
 
-const AUTH_SYNC_INTERVAL_MS = 60_000;
+const AUTH_SYNC_INTERVAL_MS = 15_000; // 15 seconds - reduced from 60s for faster sync
 
 export function useAuthSession() {
   const [session, setSession] = useState<Session | null>(null);
@@ -53,13 +53,16 @@ export function useAuthSession() {
     }
   }, []);
 
-  const startSyncLoop = useCallback((sessionActive: boolean) => {
-    stopSyncLoop();
-    runQueuedSync(sessionActive).catch(() => undefined);
-    syncTimerRef.current = setInterval(() => {
+  const startSyncLoop = useCallback(
+    (sessionActive: boolean) => {
+      stopSyncLoop();
       runQueuedSync(sessionActive).catch(() => undefined);
-    }, AUTH_SYNC_INTERVAL_MS);
-  }, [runQueuedSync, stopSyncLoop]);
+      syncTimerRef.current = setInterval(() => {
+        runQueuedSync(sessionActive).catch(() => undefined);
+      }, AUTH_SYNC_INTERVAL_MS);
+    },
+    [runQueuedSync, stopSyncLoop],
+  );
 
   const handleAppStateChange = useCallback(
     (nextAppState: AppStateStatus) => {
@@ -165,7 +168,10 @@ export function useAuthSession() {
       startSyncLoop(true);
     }
 
-    const subscription = AppState.addEventListener("change", handleAppStateChange);
+    const subscription = AppState.addEventListener(
+      "change",
+      handleAppStateChange,
+    );
 
     return () => {
       subscription.remove();

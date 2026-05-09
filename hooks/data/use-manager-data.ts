@@ -1,18 +1,23 @@
-import { useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAlerts,
   fetchVendorRouteHistory,
   fetchLatestVendorPositions,
   fetchVendorProfiles,
-} from '../../lib/mobile-data';
-import { mobileQueryKeys } from './query-keys';
+} from "../../lib/mobile-data";
+import { mobileQueryKeys } from "./query-keys";
+
+// Cache duration constants
+const CACHE_STALE_TIME = 30_000; // 30 seconds
 
 export function useAlertsData(userId?: string) {
   return useQuery({
-    queryKey: userId ? mobileQueryKeys.alerts(userId) : ['alerts', 'anonymous'],
+    queryKey: userId ? mobileQueryKeys.alerts(userId) : ["alerts", "anonymous"],
     queryFn: () => fetchAlerts(userId!),
     enabled: !!userId,
+    staleTime: CACHE_STALE_TIME,
+    gcTime: 2 * 60_000,
   });
 }
 

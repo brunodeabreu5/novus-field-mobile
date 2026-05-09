@@ -17,6 +17,7 @@ export type VisitRecord = Visit & {
   has_attachments?: boolean;
   queued?: boolean;
   pending_checkout?: boolean;
+  amount?: number | null;
 };
 
 export type ClientRecord = Client & {

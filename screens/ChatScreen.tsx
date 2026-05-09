@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   View,
   Text,
@@ -15,17 +21,28 @@ import {
   ScrollView,
   Alert,
 } from "react-native";
+import {
+  showError,
+  showPermissionDenied,
+  logError,
+} from "../lib/error-handler";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Sharing from "expo-sharing";
 import { io, type Socket } from "socket.io-client";
-import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
+import {
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { format } from "date-fns";
 import { useAuth } from "../contexts/AuthContext";
 import {
-  getAccessToken,
-} from "../lib/backend-auth";
+  useChatSocket,
+  setGlobalRefetchChat,
+} from "../providers/ChatSocketProvider";
+import { getAccessToken } from "../lib/backend-auth";
 import { offlineStorage } from "../lib/offline-storage";
 import {
   useContactsData,
@@ -35,14 +52,21 @@ import {
   useSendChatMessage,
   useToggleChatReaction,
 } from "../hooks/use-mobile-data";
-import type { ChatAttachment, ChatMessage, Contact, DraftChatAttachment } from "../lib/mobile-data";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  Contact,
+  DraftChatAttachment,
+} from "../lib/mobile-data";
 import { getBackendWsUrl } from "../lib/tenant-config";
 import { logger } from "../lib/logger";
 import type { MainTabParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
 import { spacing, fontSize, radius } from "../theme/spacing";
 
-const s = spacing; const f = fontSize; const r = radius;
+const s = spacing;
+const f = fontSize;
+const r = radius;
 
 const EMOJI_OPTIONS = ["😀", "😂", "😍", "👍", "🔥", "🎉", "🙏", "😎"];
 type ExpoAudioModule = typeof import("expo-av").Audio;
@@ -65,7 +89,9 @@ function formatDuration(seconds?: number | null) {
   return `${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`;
 }
 
-function buildAttachmentLabel(attachment: DraftChatAttachment | ChatAttachment) {
+function buildAttachmentLabel(
+  attachment: DraftChatAttachment | ChatAttachment,
+) {
   if (attachment.attachment_kind === "image") {
     return "Imagem";
   }
@@ -123,12 +149,15 @@ function getMessageStatusLabel(message: ChatMessage) {
 
 export default function ChatScreen() {
   const { user } = useAuth();
-  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, "Chat">>();
+  const navigation =
+    useNavigation<BottomTabNavigationProp<MainTabParamList, "Chat">>();
   const route = useRoute<RouteProp<MainTabParamList, "Chat">>();
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [newMessage, setNewMessage] = useState("");
   const [contactSearch, setContactSearch] = useState("");
-  const [draftAttachments, setDraftAttachments] = useState<DraftChatAttachment[]>([]);
+  const [draftAttachments, setDraftAttachments] = useState<
+    DraftChatAttachment[]
+  >([]);
   const [emojiModalVisible, setEmojiModalVisible] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null);
@@ -138,7 +167,6 @@ export default function ChatScreen() {
   const [queuedMessages, setQueuedMessages] = useState<ChatMessage[]>([]);
   const listRef = useRef<FlatList>(null);
   const soundRef = useRef<SoundHandle | null>(null);
-  const socketRef = useRef<Socket | null>(null);
   const selectedContactRef = useRef<Contact | null>(null);
 
   const {
@@ -154,6 +182,23 @@ export default function ChatScreen() {
     hasNextPage,
     isFetchingNextPage,
   } = useMessagesData(user?.id, selectedContact?.id);
+
+  // Use global socket provider
+  const { socket: globalSocket, refetchChat } = useChatSocket();
+
+  // Register refetch callback for global chat updates (after hooks are defined)
+  useEffect(() => {
+    setGlobalRefetchChat(() => {
+      refetchContacts();
+      if (selectedContact) {
+        refetchMessages();
+      }
+    });
+
+    return () => {
+      setGlobalRefetchChat(() => {});
+    };
+  }, [refetchContacts, refetchMessages, selectedContact]);
   const sendChatMessageMutation = useSendChatMessage();
   const markConversationAsReadMutation = useMarkConversationAsRead();
   const toggleReactionMutation = useToggleChatReaction();
@@ -199,7 +244,8 @@ export default function ChatScreen() {
       .sort((left, right) => left.created_at.localeCompare(right.created_at))
       .map((message) => ({
         ...message,
-        deliveryStatus: message.deliveryStatus ?? (message.queued ? "queued" : "sent"),
+        deliveryStatus:
+          message.deliveryStatus ?? (message.queued ? "queued" : "sent"),
       }));
   }, [messages, queuedMessages]);
 
@@ -217,10 +263,12 @@ export default function ChatScreen() {
       const queue = await offlineStorage.getQueue();
       const nextQueued = queue
         .filter(
-          (item): item is Extract<(typeof queue)[number], { type: "chat_send" }> =>
+          (
+            item,
+          ): item is Extract<(typeof queue)[number], { type: "chat_send" }> =>
             item.type === "chat_send" &&
             item.payload.senderId === user.id &&
-            item.payload.receiverId === selectedContact.id
+            item.payload.receiverId === selectedContact.id,
         )
         .map<ChatMessage>((item) => ({
           id: item.payload.messageId,
@@ -238,7 +286,8 @@ export default function ChatScreen() {
             file_name: attachment.fileName,
             mime_type: attachment.mimeType,
             file_size_bytes: attachment.fileSizeBytes,
-            attachment_kind: attachment.attachmentKind as ChatAttachment["attachment_kind"],
+            attachment_kind:
+              attachment.attachmentKind as ChatAttachment["attachment_kind"],
             duration_seconds: attachment.durationSeconds,
             created_at: item.payload.createdAt,
             signedUrl: null,
@@ -266,7 +315,9 @@ export default function ChatScreen() {
       return;
     }
 
-    const nextSelectedContact = contacts.find((contact) => contact.id === selectedContact.id);
+    const nextSelectedContact = contacts.find(
+      (contact) => contact.id === selectedContact.id,
+    );
     if (nextSelectedContact) {
       setSelectedContact(nextSelectedContact);
     }
@@ -298,7 +349,9 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!selectedContact) return;
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+    requestAnimationFrame(() =>
+      listRef.current?.scrollToEnd({ animated: false }),
+    );
   }, [messages.length, selectedContact]);
 
   const handleLoadOlderMessages = useCallback(() => {
@@ -318,68 +371,14 @@ export default function ChatScreen() {
     });
   }, [markConversationAsReadMutation, selectedContact, user]);
 
-  useEffect(() => {
-    if (!user) return;
-
-    let cancelled = false;
-
-    const connect = async () => {
-      const token = await getAccessToken();
-      if (!token || cancelled) return;
-
-      const wsBaseUrl = await getBackendWsUrl();
-      const socket = io(`${wsBaseUrl}/chat`, {
-        auth: { token },
-        transports: ["websocket"],
-      });
-      socketRef.current = socket;
-
-      socket.on("chat:message", (payload: Record<string, unknown>) => {
-        const senderId = typeof payload.sender_id === "string" ? payload.sender_id : null;
-        const receiverId = typeof payload.receiver_id === "string" ? payload.receiver_id : null;
-        const currentSelectedContact = selectedContactRef.current;
-        if (
-          currentSelectedContact &&
-          (senderId === currentSelectedContact.id || receiverId === currentSelectedContact.id)
-        ) {
-          refetchMessages();
-        }
-        refetchContacts();
-      });
-
-      socket.on("chat:read", () => {
-        if (selectedContactRef.current) {
-          refetchMessages();
-        }
-        refetchContacts();
-      });
-
-      socket.on("chat:reaction", () => {
-        if (selectedContactRef.current) {
-          refetchMessages();
-        }
-      });
-
-      socket.on("connect_error", (error) => {
-        logger.warn("Chat", "Socket connection error", error.message);
-      });
-
-      socket.on("chat:presence", () => {
-        refetchContacts();
-      });
-    };
-
-    void connect();
-
-    return () => {
-      cancelled = true;
-      socketRef.current?.disconnect();
-      socketRef.current = null;
-    };
-  }, [refetchContacts, refetchMessages, user]);
+  // The ChatSocketProvider already handles socket events and triggers refetch
+  // So we don't need to set up socket listeners here anymore
+  // The refetchChat callback will update contacts and messages globally
 
   const removeDraftAttachment = (uri: string) => {
-    setDraftAttachments((current) => current.filter((attachment) => attachment.uri !== uri));
+    setDraftAttachments((current) =>
+      current.filter((attachment) => attachment.uri !== uri),
+    );
   };
 
   const insertEmojiIntoMessage = (emoji: string) => {
@@ -390,7 +389,10 @@ export default function ChatScreen() {
   const pickImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert("Permiso requerido", "Debe permitir acceso a fotos para anexar imagenes.");
+      showPermissionDenied(
+        "Fotos",
+        "Debe permitir acceso a fotos para anexar imagenes.",
+      );
       return;
     }
 
@@ -436,7 +438,9 @@ export default function ChatScreen() {
         file_name: asset.name,
         mime_type: asset.mimeType || "application/octet-stream",
         file_size_bytes: asset.size || null,
-        attachment_kind: asset.mimeType?.startsWith("audio/") ? "audio" : "file",
+        attachment_kind: asset.mimeType?.startsWith("audio/")
+          ? "audio"
+          : "file",
       },
     ]);
   };
@@ -464,7 +468,8 @@ export default function ChatScreen() {
               file_size_bytes: null,
               attachment_kind: "audio",
               duration_seconds:
-                "durationMillis" in status && typeof status.durationMillis === "number"
+                "durationMillis" in status &&
+                typeof status.durationMillis === "number"
                   ? status.durationMillis / 1000
                   : null,
             },
@@ -478,16 +483,16 @@ export default function ChatScreen() {
       if (!audioModule) {
         Alert.alert(
           "Audio",
-          "Este build aun no incluye el modulo de audio. Reinstale la app para usar grabacion."
+          "Este build aun no incluye el modulo de audio. Reinstale la app para usar grabacion.",
         );
         return;
       }
 
       const permission = await audioModule.requestPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert(
-          "Permiso requerido",
-          "Debe permitir acceso al microfono para grabar audio."
+        showPermissionDenied(
+          "Micrófono",
+          "Debe permitir acceso al microfono para grabar audio.",
         );
         return;
       }
@@ -498,13 +503,15 @@ export default function ChatScreen() {
       });
 
       const recordingResult = await audioModule.Recording.createAsync(
-        audioModule.RecordingOptionsPresets.HIGH_QUALITY
+        audioModule.RecordingOptionsPresets.HIGH_QUALITY,
       );
       setRecording(recordingResult.recording);
     } catch (error) {
       Alert.alert(
         "Audio",
-        error instanceof Error ? error.message : "No se pudo procesar el audio."
+        error instanceof Error
+          ? error.message
+          : "No se pudo procesar el audio.",
       );
     } finally {
       setRecordingBusy(false);
@@ -520,7 +527,7 @@ export default function ChatScreen() {
     if (!audioModule) {
       Alert.alert(
         "Audio",
-        "Este build aun no incluye el modulo de audio. Reinstale la app para reproducir audio."
+        "Este build aun no incluye el modulo de audio. Reinstale la app para reproducir audio.",
       );
       return;
     }
@@ -540,7 +547,7 @@ export default function ChatScreen() {
 
     const playback = await audioModule.Sound.createAsync(
       { uri: attachment.signedUrl },
-      { shouldPlay: true }
+      { shouldPlay: true },
     );
 
     soundRef.current = playback.sound;
@@ -579,7 +586,7 @@ export default function ChatScreen() {
     } catch (error) {
       Alert.alert(
         "Adjunto",
-        error instanceof Error ? error.message : "No se pudo abrir el archivo."
+        error instanceof Error ? error.message : "No se pudo abrir el archivo.",
       );
     }
   };
@@ -605,10 +612,8 @@ export default function ChatScreen() {
     } catch (error) {
       setNewMessage(messageText);
       setDraftAttachments(attachments);
-      Alert.alert(
-        "Chat",
-        error instanceof Error ? error.message : "No se pudo enviar la mensagem."
-      );
+      logError("ChatScreen/send", error);
+      showError(error, "Error al enviar mensagem");
     }
   };
 
@@ -628,17 +633,15 @@ export default function ChatScreen() {
       refetchContacts();
       refetchMessages();
     } catch (error) {
-      Alert.alert(
-        "Chat",
-        error instanceof Error ? error.message : "No se pudo reenviar la mensagem.",
-      );
+      logError("ChatScreen/retry", error);
+      showError(error, "Error al reenviar mensagem");
     }
   };
 
   const handleChangeMessage = (value: string) => {
     setNewMessage(value);
-    if (!selectedContact || !socketRef.current) return;
-    socketRef.current.emit("chat:typing", {
+    if (!selectedContact || !globalSocket) return;
+    globalSocket.emit("chat:typing", {
       toUserId: selectedContact.id,
       isTyping: value.trim().length > 0,
     });
@@ -660,7 +663,9 @@ export default function ChatScreen() {
     } catch (error) {
       Alert.alert(
         "Reaccion",
-        error instanceof Error ? error.message : "No se pudo actualizar la reaccion."
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar la reaccion.",
       );
     }
   };
@@ -705,7 +710,9 @@ export default function ChatScreen() {
                   <View
                     style={[
                       styles.statusDot,
-                      item.isOnline ? styles.statusDotOnline : styles.statusDotOffline,
+                      item.isOnline
+                        ? styles.statusDotOnline
+                        : styles.statusDotOffline,
                     ]}
                   />
                 </View>
@@ -753,12 +760,16 @@ export default function ChatScreen() {
           onPress={() => setSelectedContact(null)}
         >
           <View style={styles.chatHeaderRow}>
-            <Text style={styles.backText}>Volver a {selectedContact.full_name}</Text>
+            <Text style={styles.backText}>
+              Volver a {selectedContact.full_name}
+            </Text>
             <View style={styles.chatHeaderPresence}>
               <View
                 style={[
                   styles.statusDot,
-                  selectedContact.isOnline ? styles.statusDotOnline : styles.statusDotOffline,
+                  selectedContact.isOnline
+                    ? styles.statusDotOnline
+                    : styles.statusDotOffline,
                 ]}
               />
               <Text style={styles.chatHeaderPresenceText}>
@@ -787,13 +798,15 @@ export default function ChatScreen() {
                   <TouchableOpacity
                     onLongPress={() =>
                       setReactionTargetId((current) =>
-                        current === item.id ? null : item.id
+                        current === item.id ? null : item.id,
                       )
                     }
                     activeOpacity={0.9}
                     style={[
                       styles.bubble,
-                      item.sender_id === user?.id ? styles.bubbleMe : styles.bubbleThem,
+                      item.sender_id === user?.id
+                        ? styles.bubbleMe
+                        : styles.bubbleThem,
                     ]}
                   >
                     {item.message ? (
@@ -816,10 +829,13 @@ export default function ChatScreen() {
                         disabled={attachment.queued}
                         style={[
                           styles.attachmentCard,
-                          attachment.queued ? styles.attachmentCardQueued : null,
+                          attachment.queued
+                            ? styles.attachmentCardQueued
+                            : null,
                         ]}
                       >
-                        {attachment.attachment_kind === "image" && attachment.signedUrl ? (
+                        {attachment.attachment_kind === "image" &&
+                        attachment.signedUrl ? (
                           <Image
                             source={{ uri: attachment.signedUrl }}
                             style={styles.attachmentImage}
@@ -836,7 +852,8 @@ export default function ChatScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            {attachment.file_name || buildAttachmentLabel(attachment)}
+                            {attachment.file_name ||
+                              buildAttachmentLabel(attachment)}
                           </Text>
                           <Text
                             style={[
@@ -847,29 +864,16 @@ export default function ChatScreen() {
                             ]}
                           >
                             {buildAttachmentLabel(attachment)}
-                           {attachment.duration_seconds
-                               ? ` · ${formatDuration(attachment.duration_seconds)}`
-                               : ""}
-                           </Text>
-                           {attachment.queued ? (
-                             <Text style={styles.queuedAttachmentBadge}>Pendente de sync</Text>
-                           ) : null}
-                           {attachment.attachment_kind === "audio" ? (
-                             <Text
-                               style={[
-                                 styles.attachmentAction,
-                                 item.sender_id === user?.id
-                                   ? styles.bubbleTextMe
-                                   : styles.bubbleTextThem,
-                               ]}
-                             >
-                               {attachment.queued
-                                 ? "Sincroniza al volver la conexion"
-                                 : activeAudioId === attachment.id
-                                 ? "Pausar"
-                                 : "Reproducir"}
-                             </Text>
-                           ) : attachment.attachment_kind === "file" ? (
+                            {attachment.duration_seconds
+                              ? ` · ${formatDuration(attachment.duration_seconds)}`
+                              : ""}
+                          </Text>
+                          {attachment.queued ? (
+                            <Text style={styles.queuedAttachmentBadge}>
+                              Pendente de sync
+                            </Text>
+                          ) : null}
+                          {attachment.attachment_kind === "audio" ? (
                             <Text
                               style={[
                                 styles.attachmentAction,
@@ -878,12 +882,27 @@ export default function ChatScreen() {
                                   : styles.bubbleTextThem,
                               ]}
                             >
-                               {attachment.queued
-                                 ? "Sincroniza al volver la conexion"
-                                 : "Abrir / compartir"}
-                             </Text>
-                           ) : null}
-                         </View>
+                              {attachment.queued
+                                ? "Sincroniza al volver la conexion"
+                                : activeAudioId === attachment.id
+                                  ? "Pausar"
+                                  : "Reproducir"}
+                            </Text>
+                          ) : attachment.attachment_kind === "file" ? (
+                            <Text
+                              style={[
+                                styles.attachmentAction,
+                                item.sender_id === user?.id
+                                  ? styles.bubbleTextMe
+                                  : styles.bubbleTextThem,
+                              ]}
+                            >
+                              {attachment.queued
+                                ? "Sincroniza al volver la conexion"
+                                : "Abrir / compartir"}
+                            </Text>
+                          ) : null}
+                        </View>
                       </Pressable>
                     ))}
 
@@ -913,15 +932,18 @@ export default function ChatScreen() {
                         </Text>
                       ) : null}
                     </View>
-                    {item.deliveryStatus === "failed" && item.sender_id === user?.id ? (
+                    {item.deliveryStatus === "failed" &&
+                    item.sender_id === user?.id ? (
                       <TouchableOpacity
                         style={styles.retryMessageButton}
                         onPress={() => retryMessage(item)}
                       >
-                        <Text style={styles.retryMessageButtonText}>Reenviar</Text>
+                        <Text style={styles.retryMessageButtonText}>
+                          Reenviar
+                        </Text>
                       </TouchableOpacity>
                     ) : null}
-                    </TouchableOpacity>
+                  </TouchableOpacity>
 
                   {groupedReactions.length > 0 ? (
                     <View style={styles.reactionRow}>
@@ -933,7 +955,9 @@ export default function ChatScreen() {
                             reaction.userIds.includes(user?.id || "") &&
                               styles.reactionChipActive,
                           ]}
-                          onPress={() => toggleReaction(item.id, reaction.emoji)}
+                          onPress={() =>
+                            toggleReaction(item.id, reaction.emoji)
+                          }
                         >
                           <Text style={styles.reactionChipText}>
                             {reaction.emoji} {reaction.count}
@@ -964,12 +988,16 @@ export default function ChatScreen() {
               isFetchingNextPage ? (
                 <View style={styles.messagesPaginationLoader}>
                   <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={styles.messagesPaginationText}>Cargando mensajes anteriores...</Text>
+                  <Text style={styles.messagesPaginationText}>
+                    Cargando mensajes anteriores...
+                  </Text>
                 </View>
               ) : null
             }
             ListEmptyComponent={
-              <Text style={styles.emptyMsg}>Escriba un mensaje para comenzar</Text>
+              <Text style={styles.emptyMsg}>
+                Escriba un mensaje para comenzar
+              </Text>
             }
           />
         )}
@@ -983,7 +1011,10 @@ export default function ChatScreen() {
             {draftAttachments.map((attachment) => (
               <View key={attachment.uri} style={styles.draftAttachmentCard}>
                 {attachment.attachment_kind === "image" ? (
-                  <Image source={{ uri: attachment.uri }} style={styles.draftImage} />
+                  <Image
+                    source={{ uri: attachment.uri }}
+                    style={styles.draftImage}
+                  />
                 ) : null}
                 <View style={styles.draftAttachmentInfo}>
                   <Text style={styles.draftAttachmentTitle} numberOfLines={1}>
@@ -995,9 +1026,13 @@ export default function ChatScreen() {
                       ? ` · ${formatDuration(attachment.duration_seconds)}`
                       : ""}
                   </Text>
-                  <Text style={styles.draftQueuedHint}>Se sincroniza si estas offline</Text>
+                  <Text style={styles.draftQueuedHint}>
+                    Se sincroniza si estas offline
+                  </Text>
                 </View>
-                <TouchableOpacity onPress={() => removeDraftAttachment(attachment.uri)}>
+                <TouchableOpacity
+                  onPress={() => removeDraftAttachment(attachment.uri)}
+                >
                   <Text style={styles.removeAttachment}>Remover</Text>
                 </TouchableOpacity>
               </View>
@@ -1006,7 +1041,10 @@ export default function ChatScreen() {
         ) : null}
 
         <View style={styles.composerActionsRow}>
-          <TouchableOpacity style={styles.toolBtn} onPress={() => setEmojiModalVisible(true)}>
+          <TouchableOpacity
+            style={styles.toolBtn}
+            onPress={() => setEmojiModalVisible(true)}
+          >
             <Text style={styles.toolBtnText}>😊</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.toolBtn} onPress={pickImage}>
@@ -1060,7 +1098,10 @@ export default function ChatScreen() {
       </KeyboardAvoidingView>
 
       <Modal visible={emojiModalVisible} transparent animationType="fade">
-        <Pressable style={styles.modalBackdrop} onPress={() => setEmojiModalVisible(false)}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setEmojiModalVisible(false)}
+        >
           <Pressable style={styles.emojiModal}>
             <Text style={styles.modalTitle}>Emojis</Text>
             <View style={styles.emojiGrid}>
@@ -1080,11 +1121,17 @@ export default function ChatScreen() {
 
       <Modal visible={!!imagePreviewUrl} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
-          <Pressable style={styles.imagePreviewClose} onPress={() => setImagePreviewUrl(null)}>
+          <Pressable
+            style={styles.imagePreviewClose}
+            onPress={() => setImagePreviewUrl(null)}
+          >
             <Text style={styles.imagePreviewCloseText}>Fechar</Text>
           </Pressable>
           {imagePreviewUrl ? (
-            <Image source={{ uri: imagePreviewUrl }} style={styles.imagePreview} />
+            <Image
+              source={{ uri: imagePreviewUrl }}
+              style={styles.imagePreview}
+            />
           ) : null}
         </View>
       </Modal>
@@ -1133,7 +1180,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: s.sm,
   },
-  avatarText: { color: colors.primaryForeground, fontSize: f.lg, fontWeight: "600" },
+  avatarText: {
+    color: colors.primaryForeground,
+    fontSize: f.lg,
+    fontWeight: "600",
+  },
   contactInfo: { flex: 1 },
   contactNameRow: { flexDirection: "row", alignItems: "center", gap: s.sm },
   contactName: { fontSize: f.md, fontWeight: "600", color: colors.foreground },
@@ -1148,7 +1199,11 @@ const styles = StyleSheet.create({
   statusDotOffline: {
     backgroundColor: colors.destructive,
   },
-  contactPreview: { fontSize: f.base, color: colors.mutedForeground, marginTop: 2 },
+  contactPreview: {
+    fontSize: f.base,
+    color: colors.mutedForeground,
+    marginTop: 2,
+  },
   unreadBadge: {
     minWidth: 24,
     height: 24,
@@ -1158,7 +1213,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  unreadText: { color: colors.primaryForeground, fontSize: f.sm, fontWeight: "700" },
+  unreadText: {
+    color: colors.primaryForeground,
+    fontSize: f.sm,
+    fontWeight: "700",
+  },
   empty: { textAlign: "center", color: colors.mutedForeground, padding: s.xl },
   chatContainer: { flex: 1, backgroundColor: colors.background },
   backBar: {

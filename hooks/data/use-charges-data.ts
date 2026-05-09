@@ -8,11 +8,18 @@ import {
 } from "../../lib/mobile-data";
 import { mobileQueryKeys } from "./query-keys";
 
+// Cache duration constants
+const CACHE_STALE_TIME = 60_000; // 1 minute
+
 export function useChargesData(userId?: string) {
   return useQuery({
-    queryKey: userId ? mobileQueryKeys.charges(userId) : ["charges", "anonymous"],
+    queryKey: userId
+      ? mobileQueryKeys.charges(userId)
+      : ["charges", "anonymous"],
     queryFn: () => fetchCharges(userId!),
     enabled: !!userId,
+    staleTime: CACHE_STALE_TIME,
+    gcTime: 5 * 60_000,
   });
 }
 
@@ -21,6 +28,9 @@ export function useCreateCharge() {
 
   return useMutation({
     mutationFn: createCharge,
+    onError: (error) => {
+      console.error("[useCreateCharge] Error creating charge:", error);
+    },
     onSuccess: (result, variables) => {
       queryClient.setQueryData<Charge[]>(
         mobileQueryKeys.charges(variables.userId),
@@ -29,7 +39,7 @@ export function useCreateCharge() {
             return current;
           }
           return [{ ...result.charge, queued: result.queued }, ...current];
-        }
+        },
       );
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.dashboard(variables.userId),
@@ -43,10 +53,16 @@ export function useUpdateCharge() {
 
   return useMutation({
     mutationFn: updateCharge,
+    onError: (error) => {
+      console.error("[useUpdateCharge] Error updating charge:", error);
+    },
     onSuccess: (updatedCharge, variables) => {
       queryClient.setQueryData<Charge[]>(
         mobileQueryKeys.charges(variables.userId),
-        (current = []) => current.map((item) => (item.id === updatedCharge.id ? updatedCharge : item)),
+        (current = []) =>
+          current.map((item) =>
+            item.id === updatedCharge.id ? updatedCharge : item,
+          ),
       );
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.dashboard(variables.userId),
@@ -60,10 +76,19 @@ export function useUpdateChargeStatus() {
 
   return useMutation({
     mutationFn: updateChargeStatus,
+    onError: (error) => {
+      console.error(
+        "[useUpdateChargeStatus] Error updating charge status:",
+        error,
+      );
+    },
     onSuccess: (updatedCharge, variables) => {
       queryClient.setQueryData<Charge[]>(
         mobileQueryKeys.charges(variables.userId),
-        (current = []) => current.map((item) => (item.id === updatedCharge.id ? updatedCharge : item)),
+        (current = []) =>
+          current.map((item) =>
+            item.id === updatedCharge.id ? updatedCharge : item,
+          ),
       );
       queryClient.invalidateQueries({
         queryKey: mobileQueryKeys.dashboard(variables.userId),

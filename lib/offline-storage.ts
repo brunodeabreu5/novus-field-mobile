@@ -44,6 +44,7 @@ export interface ManualVisitCreatePayload {
   clientName: string;
   notes: string | null;
   visitType: string | null;
+  amount: number | null;
   timestamp: string;
 }
 
@@ -255,7 +256,7 @@ export const offlineStorage = {
   async incrementRetries(id: string) {
     const queue = await loadQueue();
     const next = queue.map((item) =>
-      item.id === id ? { ...item, retries: item.retries + 1 } : item
+      item.id === id ? { ...item, retries: item.retries + 1 } : item,
     );
     await saveQueue(next);
   },
