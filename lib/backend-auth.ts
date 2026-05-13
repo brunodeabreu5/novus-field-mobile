@@ -1,5 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getBackendApiUrl } from "./tenant-config";
+import {
+  clearRegisteredExpoPushToken,
+  getRegisteredExpoPushToken,
+} from "./push-token-state";
 
 // expo-secure-store may not be available in all builds
 let SecureStore: typeof import("expo-secure-store") | null = null;
@@ -107,6 +111,7 @@ async function readAuthStorage(): Promise<string | null> {
 function buildBackgroundFallbackState(state: StoredAuthState): StoredAuthState {
   return {
     accessToken: state.accessToken,
+    refreshToken: state.refreshToken,
     user: state.user,
   };
 }
@@ -128,8 +133,8 @@ async function writeAuthStorage(state: StoredAuthState | null) {
   const secureValue = JSON.stringify(state);
   const fallbackValue = JSON.stringify(buildBackgroundFallbackState(state));
 
-  // SecureStore guarda a sessão completa; AsyncStorage mantém apenas fallback
-  // mínimo para tarefas em background, sem refresh token.
+  // SecureStore guarda a sessão completa; AsyncStorage mantém fallback
+  // completo também (com refreshToken) para recuperação em background.
   if (SecureStore) {
     try {
       await SecureStore.setItemAsync(
@@ -283,9 +288,28 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 export async function refreshStoredAuthSession(): Promise<string | null> {
-  const current = await readStoredState();
+  let current = await readStoredState();
   if (!current) {
     return null;
+  }
+
+  // Defesa: se o refreshToken sumiu do estado em memória / AsyncStorage fallback,
+  // tenta re-ler diretamente do SecureStore antes de desistir.
+  if (!current.refreshToken && SecureStore) {
+    try {
+      const secureRaw = await SecureStore.getItemAsync(
+        AUTH_STORAGE_KEY,
+        SECURE_STORE_OPTIONS,
+      );
+      if (secureRaw) {
+        const secureState = JSON.parse(secureRaw) as StoredAuthState;
+        if (secureState.refreshToken) {
+          current = secureState;
+        }
+      }
+    } catch {
+      // Ignora falha de leitura do SecureStore
+    }
   }
 
   try {
@@ -301,7 +325,11 @@ export async function refreshStoredAuthSession(): Promise<string | null> {
     });
     const snapshot = await storeAuthResponse(refreshed);
     return snapshot.session?.access_token ?? null;
-  } catch {
+  } catch (error) {
+    // Nunca limpa a sessão por erro de rede — só por erro de autenticação real
+    if (isNetworkError(error)) {
+      return null;
+    }
     await writeStoredState(null);
     emit(null);
     return null;
@@ -310,6 +338,35 @@ export async function refreshStoredAuthSession(): Promise<string | null> {
 
 export async function getCurrentUserId(): Promise<string | null> {
   return (await readStoredState())?.user.id ?? null;
+}
+
+function isAuthError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes("unauthorized") ||
+      msg.includes("401") ||
+      msg.includes("403") ||
+      msg.includes("invalid token") ||
+      msg.includes("token expired") ||
+      msg.includes("jwt expired")
+    );
+  }
+  return false;
+}
+
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes("network") ||
+      msg.includes("fetch") ||
+      msg.includes("timeout") ||
+      msg.includes("offline") ||
+      msg.includes("could not connect")
+    );
+  }
+  return false;
 }
 
 export async function initializeAuth(): Promise<AuthSnapshot> {
@@ -328,11 +385,22 @@ export async function initializeAuth(): Promise<AuthSnapshot> {
     await writeStoredState(nextState);
     emit(nextState);
     return toSnapshot(nextState);
-  } catch {
+  } catch (meError) {
+    // Erro de rede ou servidor indisponível: mantém a sessão intacta.
+    // O app tentará refresh automaticamente na próxima chamada de API.
+    if (isNetworkError(meError)) {
+      return toSnapshot(current);
+    }
+
     try {
       await refreshStoredAuthSession();
       return toSnapshot(await readStoredState());
-    } catch {
+    } catch (refreshError) {
+      // Erro de rede no refresh também não deve deslogar
+      if (isNetworkError(refreshError)) {
+        return toSnapshot(current);
+      }
+      // Só desloga se for erro de autenticação real (token inválido/expirado)
       await writeStoredState(null);
       emit(null);
       return toSnapshot(null);
@@ -370,6 +438,17 @@ export async function signOut() {
   const current = await readStoredState();
   if (current) {
     try {
+      const expoPushToken = getRegisteredExpoPushToken();
+      if (expoPushToken) {
+        await request<{ success: boolean }>(
+          `/notifications/push/mobile-tokens?token=${encodeURIComponent(expoPushToken)}`,
+          {
+            method: "DELETE",
+          },
+          current.accessToken,
+        );
+      }
+
       if (current.refreshToken) {
         await request<{ success: boolean }>(
           "/auth/logout",
@@ -385,6 +464,7 @@ export async function signOut() {
     }
   }
 
+  clearRegisteredExpoPushToken();
   await writeStoredState(null);
   emit(null);
 }

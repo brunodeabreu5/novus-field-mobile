@@ -3,6 +3,7 @@ import { NavigationContainer, useNavigationContainerRef } from "@react-navigatio
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 import { useAuth } from "../contexts/AuthContext";
@@ -25,6 +26,7 @@ import AlertHistoryScreen from "../screens/AlertHistoryScreen";
 import AlertConfigScreen from "../screens/AlertConfigScreen";
 import VisitSettingsScreen from "../screens/VisitSettingsScreen";
 import ReportsScreen from "../screens/ReportsScreen";
+import TrackingDiagnosticsScreen from "../screens/TrackingDiagnosticsScreen";
 import type { MainTabParamList, ManagerStackParamList, RootStackParamList } from "./types";
 import { colors } from "../theme/colors";
 
@@ -85,6 +87,7 @@ function BiometricLockScreen() {
 
 function MainTabs() {
   const { isManagerOrAdmin } = useAuth();
+  const insets = useSafeAreaInsets();
 
   return (
     <Tab.Navigator
@@ -96,7 +99,8 @@ function MainTabs() {
           borderTopColor: colors.border,
           borderTopWidth: 1,
           paddingTop: 8,
-          minHeight: 60,
+          paddingBottom: Math.max(insets.bottom, 8),
+          minHeight: 60 + Math.max(insets.bottom - 8, 0),
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
         headerStyle: { backgroundColor: colors.background },
@@ -355,6 +359,11 @@ export default function RootNavigator() {
         <>
           <Stack.Navigator screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen
+              name="TrackingDiagnostics"
+              component={TrackingDiagnosticsScreen}
+              options={{ title: "Diagnostico de rastreo", headerShown: true }}
+            />
           </Stack.Navigator>
           <DrawerMenu />
         </>

@@ -1,5 +1,4 @@
-import { useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   fetchAlerts,
   fetchVendorRouteHistory,
@@ -27,6 +26,8 @@ export function useVendorPositions(enabled = true) {
     queryFn: fetchLatestVendorPositions,
     enabled,
     refetchInterval: enabled ? 15000 : false,
+    staleTime: 15_000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -48,19 +49,7 @@ export function useVendorsData(enabled = true) {
     queryFn: fetchVendorProfiles,
     enabled,
     refetchInterval: enabled ? 60000 : false,
+    staleTime: CACHE_STALE_TIME,
+    refetchIntervalInBackground: false,
   });
-}
-
-export function useVendorPositionsSubscription(enabled = true) {
-  const queryClient = useQueryClient();
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const interval = setInterval(() => {
-      void queryClient.invalidateQueries({ queryKey: mobileQueryKeys.map });
-    }, 15000);
-
-    return () => clearInterval(interval);
-  }, [enabled, queryClient]);
 }

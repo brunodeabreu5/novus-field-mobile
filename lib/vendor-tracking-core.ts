@@ -8,6 +8,11 @@ import { isExpectedAuthError } from "./auth-errors";
 import { backendApi } from "./backend-api";
 import { logger } from "./logger";
 import {
+  recordBackgroundDelivery,
+  recordBackgroundError,
+} from "./tracking-diagnostics";
+import { refreshStoredAuthSession } from "./backend-auth";
+import {
   getFreshCurrentPosition,
   getFreshLastKnownPosition,
   isFreshLocation,
@@ -428,7 +433,45 @@ export async function persistPosition(
     if (isExpectedAuthError(error)) {
       logger.warn(
         "Tracking",
-        `Auth error in ${options.trackingMode} mode - queuing position for later sync`,
+        `Auth error in ${options.trackingMode} mode - attempting silent refresh`,
+      );
+
+      // Attempt silent refresh before giving up and queuing
+      const refreshedToken = await refreshStoredAuthSession();
+      if (refreshedToken) {
+        try {
+          await backendApi.post("/tracking/positions", {
+            vendor_id: vendorId,
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+            accuracy_meters: payload.accuracy_meters,
+            speed_kmh: payload.speed_kmh,
+            heading: payload.heading,
+            idle_duration_seconds: payload.idle_duration_seconds,
+            is_idle: payload.is_idle,
+            recorded_at: payload.recorded_at,
+          });
+          publishTrackingHeartbeat(vendorId, {
+            trackingMode: options.trackingMode,
+            lastPositionAt: timestampIso,
+          });
+          await flushQueuedTrackingPositions("silent refresh recovery");
+          logger.info(
+            "Tracking",
+            `Silent refresh succeeded in ${options.trackingMode} mode - position sent`,
+          );
+          return;
+        } catch (retryError) {
+          logger.warn(
+            "Tracking",
+            `Silent refresh succeeded but position retry failed in ${options.trackingMode} mode`,
+          );
+        }
+      }
+
+      logger.warn(
+        "Tracking",
+        `Queuing position after failed refresh in ${options.trackingMode} mode`,
       );
       await persistVendorPositionInOfflineQueue(vendorId, {
         latitude: payload.latitude,
@@ -476,13 +519,15 @@ export async function processBackgroundLocationBatch(
   cacheMaxAgeMs: number,
 ) {
   const geofenceVendorName = await getStoredGeofenceVendorName();
+  const isFallback = locations.length === 0;
 
-  if (locations.length === 0) {
+  if (isFallback) {
     const fallbackLocation = await resolveCurrentLocation(
       vendorId,
       cacheMaxAgeMs,
     );
     if (!fallbackLocation) {
+      await recordBackgroundError("Fallback location resolution returned null");
       return;
     }
 
@@ -505,11 +550,22 @@ export async function processBackgroundLocationBatch(
         vendorId,
         vendorName: geofenceVendorName,
       });
+      await recordBackgroundDelivery({
+        vendorId,
+        locationCount: 0,
+        wasFallback: true,
+      });
     } catch (insertError) {
       if (isExpectedAuthError(insertError)) {
+        await recordBackgroundError(
+          `Auth error on fallback: ${getUnknownErrorMessage(insertError)}`,
+        );
         return;
       }
 
+      await recordBackgroundError(
+        `Fallback persist failed: ${getUnknownErrorMessage(insertError)}`,
+      );
       logger.warn(
         "Tracking",
         "Background fallback position failed:",
@@ -520,6 +576,7 @@ export async function processBackgroundLocationBatch(
     return;
   }
 
+  let persistedCount = 0;
   for (const location of locations) {
     const normalized = await normalizeTrackingLocation(
       vendorId,
@@ -550,16 +607,31 @@ export async function processBackgroundLocationBatch(
         vendorId,
         vendorName: geofenceVendorName,
       });
+      persistedCount++;
     } catch (insertError) {
       if (isExpectedAuthError(insertError)) {
-        return;
+        await recordBackgroundError(
+          `Auth error on batch: ${getUnknownErrorMessage(insertError)}`,
+        );
+        break;
       }
 
+      await recordBackgroundError(
+        `Batch persist failed: ${getUnknownErrorMessage(insertError)}`,
+      );
       logger.warn(
         "Tracking",
         "Background position failed:",
         getUnknownErrorMessage(insertError),
       );
     }
+  }
+
+  if (persistedCount > 0) {
+    await recordBackgroundDelivery({
+      vendorId,
+      locationCount: persistedCount,
+      wasFallback: false,
+    });
   }
 }

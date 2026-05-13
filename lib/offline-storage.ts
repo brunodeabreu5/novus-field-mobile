@@ -130,6 +130,7 @@ interface QueuedActionBase {
   id: string;
   createdAt: string;
   retries: number;
+  nextRetryAt?: string | null;
 }
 
 export interface CheckInAction extends QueuedActionBase {
@@ -238,6 +239,7 @@ export const offlineStorage = {
       id: `q-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       createdAt: new Date().toISOString(),
       retries: 0,
+      nextRetryAt: null,
     } as QueuedAction;
     queue.push(item);
     await saveQueue(queue);
@@ -255,9 +257,17 @@ export const offlineStorage = {
 
   async incrementRetries(id: string) {
     const queue = await loadQueue();
-    const next = queue.map((item) =>
-      item.id === id ? { ...item, retries: item.retries + 1 } : item,
-    );
+    const next = queue.map((item) => {
+      if (item.id !== id) return item;
+      const retries = item.retries + 1;
+      // Exponential backoff: 1s, 2s, 4s, 8s ... capped at 5 minutes
+      const delayMs = Math.min(1000 * Math.pow(2, retries), 5 * 60 * 1000);
+      return {
+        ...item,
+        retries,
+        nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
+      };
+    });
     await saveQueue(next);
   },
 

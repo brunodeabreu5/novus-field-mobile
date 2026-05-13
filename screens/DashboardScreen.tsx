@@ -6,10 +6,12 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../contexts/AuthContext";
 import { useDashboardData } from "../hooks/use-mobile-data";
 import type { Visit } from "../lib/mobile-data";
 import { colors } from "../theme/colors";
+import { useTheme } from "../contexts/ThemeContext";
 import { spacing, fontSize, radius } from "../theme/spacing";
 
 const VISIT_TYPE_LABELS: Record<string, string> = {
@@ -21,6 +23,7 @@ const VISIT_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function DashboardScreen() {
+  const { colors } = useTheme();
   const { user, profile } = useAuth();
   const { data, isLoading, error } = useDashboardData(user?.id);
 
@@ -42,14 +45,15 @@ export default function DashboardScreen() {
 
   if (isLoading) {
     return (
-      <View style={styles.center}>
+      <SafeAreaView style={styles.center} edges={["top", "left", "right"]}>
         <ActivityIndicator size="large" color={colors.primary} />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Hola, {firstName}</Text>
       <Text style={styles.subtitle}>Tu resumen de actividad de hoy</Text>
 
@@ -139,7 +143,8 @@ export default function DashboardScreen() {
           recentVisits.map((visit) => <RecentVisitRow key={visit.id} visit={visit} />)
         )}
       </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

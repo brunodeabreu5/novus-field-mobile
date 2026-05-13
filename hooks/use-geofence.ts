@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { AppState, type AppStateStatus } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { backendApi } from "../lib/backend-api";
@@ -337,6 +338,8 @@ export function useGeofence(options: UseGeofenceOptions) {
   const insideZonesRef = useRef<Set<string>>(new Set());
   const activeVisitsRef = useRef<Map<string, VisitCheckIn>>(new Map());
   const runInFlightRef = useRef(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const [appIsActive, setAppIsActive] = useState(AppState.currentState === "active");
 
   useEffect(() => {
     if (enabled && vendorId) {
@@ -370,6 +373,17 @@ export function useGeofence(options: UseGeofenceOptions) {
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      appStateRef.current = nextAppState;
+      setAppIsActive(nextAppState === "active");
+    });
+
+    return () => {
+      subscription.remove();
     };
   }, []);
 
@@ -450,7 +464,7 @@ export function useGeofence(options: UseGeofenceOptions) {
   }, [enabled, vendorId, vendorName]);
 
   useEffect(() => {
-    if (!enabled || zones.length === 0) return;
+    if (!enabled || zones.length === 0 || !appIsActive) return;
 
     let interval: ReturnType<typeof setInterval>;
     let cancelled = false;
@@ -517,7 +531,7 @@ export function useGeofence(options: UseGeofenceOptions) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [enabled, zones, vendorId, vendorName, autoCheckIn, intervalMs]);
+  }, [appIsActive, enabled, zones, vendorId, vendorName, autoCheckIn, intervalMs]);
 
   const manualCheckOut = useCallback(
     (zoneId: string) => {

@@ -1,12 +1,16 @@
 import React from "react";
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from "react-native";
+import {
+  View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ManagerStackParamList } from "../navigation/types";
 import { useVendorsData } from "../hooks/use-mobile-data";
 import { colors } from "../theme/colors";
+import { useTheme } from "../contexts/ThemeContext";
 
 export default function VendorsScreen() {
+  const { colors } = useTheme();
   const { data: vendors = [], isLoading } = useVendorsData();
   const navigation = useNavigation<NativeStackNavigationProp<ManagerStackParamList, "Vendors">>();
 
@@ -19,7 +23,7 @@ export default function VendorsScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <FlatList
         data={vendors}
         keyExtractor={(item) => item.user_id}
@@ -41,7 +45,7 @@ export default function VendorsScreen() {
           <Text style={styles.empty}>Sin vendedores</Text>
         }
       />
-    </View>
+    </SafeAreaView>
   );
 }
 

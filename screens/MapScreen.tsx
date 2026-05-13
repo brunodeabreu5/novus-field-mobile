@@ -14,7 +14,6 @@ import { es } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
 import {
   useVendorPositions,
-  useVendorPositionsSubscription,
   useVendorsData,
   useVendorRouteHistory,
   useClientsData,
@@ -71,7 +70,7 @@ export default function MapScreen() {
   );
   const [showClients, setShowClients] = useState(true);
 
-  useVendorPositionsSubscription(isManagerOrAdmin);
+  // useVendorPositions já inclui refetchInterval de 15s
 
   const latestByVendor = useMemo(() => {
     return positions.reduce(

@@ -161,7 +161,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 32,
     fontWeight: "bold",
-    color: "#ffffff",
+    color: colors.primaryForeground,
   },
   name: {
     fontSize: 24,

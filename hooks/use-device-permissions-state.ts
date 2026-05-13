@@ -14,6 +14,10 @@ import {
 } from "../lib/location-utils";
 import { logger } from "../lib/logger";
 import { configureAndroidNotificationChannel } from "../lib/mobile-notifications";
+import {
+  clearRegisteredExpoPushToken,
+  setRegisteredExpoPushToken,
+} from "../lib/push-token-state";
 import { isOfflineLikeError } from "../lib/sync";
 
 export type PermissionState = "unknown" | "granted" | "denied" | "unsupported";
@@ -181,6 +185,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
       if (isExpoGo) {
         setNotificationPermission("unsupported");
         setExpoPushToken(null);
+        clearRegisteredExpoPushToken();
         registeredTokenRef.current = null;
         return;
       }
@@ -311,6 +316,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
 
     clearRegistrationRetry();
     setExpoPushToken(null);
+    clearRegisteredExpoPushToken();
     registeredTokenRef.current = null;
   }, [clearRegistrationRetry, sessionActive]);
 
@@ -323,6 +329,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
     ) {
       clearRegistrationRetry();
       setExpoPushToken(null);
+      clearRegisteredExpoPushToken();
       registeredTokenRef.current = null;
       return;
     }
@@ -338,6 +345,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
         if (!projectId) {
           if (!cancelled) {
             setExpoPushToken(null);
+            clearRegisteredExpoPushToken();
             registeredTokenRef.current = null;
           }
           return;
@@ -351,6 +359,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
 
         if (!token || registeredTokenRef.current === token) {
           setExpoPushToken(token);
+          setRegisteredExpoPushToken(token);
           return;
         }
 
@@ -360,6 +369,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
         }
 
         setExpoPushToken(token);
+        setRegisteredExpoPushToken(token);
         registeredTokenRef.current = token;
         setLastError(null);
       } catch (error) {
@@ -369,6 +379,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
 
         if (isExpoProjectIdConfigurationError(error)) {
           setExpoPushToken(null);
+          clearRegisteredExpoPushToken();
           registeredTokenRef.current = null;
           setLastError(
             "Push notification credentials are not configured for this build."
@@ -383,6 +394,7 @@ export function useDevicePermissionsState(sessionActive: boolean) {
 
         if (isExpectedAuthError(error)) {
           setExpoPushToken(null);
+          clearRegisteredExpoPushToken();
           registeredTokenRef.current = null;
           setLastError(null);
           return;

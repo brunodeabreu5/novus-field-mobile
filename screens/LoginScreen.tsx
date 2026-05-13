@@ -15,12 +15,15 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTenant } from "../contexts/TenantContext";
 import { colors } from "../theme/colors";
 import { spacing, fontSize, radius } from "../theme/spacing";
+import { useTheme } from "../contexts/ThemeContext";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface LoginScreenProps {
   onSuccess: () => void;
 }
 
 export default function LoginScreen({ onSuccess }: LoginScreenProps) {
+  const { colors } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -68,10 +71,11 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
@@ -160,7 +164,8 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
           </TouchableOpacity>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 

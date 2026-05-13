@@ -1,5 +1,6 @@
 import { getAccessToken, refreshStoredAuthSession } from "./backend-auth";
 import { resolveApiTimeoutMs } from "./config";
+import { logger } from "./logger";
 import { getBackendApiUrl } from "./tenant-config";
 
 export type CollectionResponse<T> = {
@@ -75,7 +76,7 @@ async function fetchWithToken(
 
     // Retry on server errors
     if (RETRYABLE_HTTP_STATUS.includes(response.status) && retries > 0) {
-      console.warn(`[API] Retrying ${path}, ${retries} attempts left`);
+      logger.warn("API", `Retrying ${path}, ${retries} attempt(s) left`);
       await delay(RETRY_DELAY_MS);
       return fetchWithToken(apiUrl, path, init, accessToken, retries - 1);
     }
@@ -90,8 +91,9 @@ async function fetchWithToken(
         RETRYABLE_NETWORK_ERRORS.some((e) => errorMessage.includes(e)));
 
     if (isRetryable && retries > 0) {
-      console.warn(
-        `[API] Retrying ${path} after network error, ${retries} attempts left`,
+      logger.warn(
+        "API",
+        `Retrying ${path} after network error, ${retries} attempt(s) left`,
       );
       await delay(RETRY_DELAY_MS);
       return fetchWithToken(apiUrl, path, init, accessToken, retries - 1);
@@ -140,7 +142,7 @@ async function request<T>(
 
   // Handle 401 - try to refresh token
   if (response.status === 401 && retryCount === 0) {
-    console.log("[API] Token expired, attempting refresh...");
+    logger.debug("API", `Token expired while requesting ${path}; attempting refresh`);
     const refreshedToken = await refreshStoredAuthSession();
     if (refreshedToken) {
       response = await fetchWithToken(apiUrl, path, init, refreshedToken);

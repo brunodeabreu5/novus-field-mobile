@@ -168,6 +168,9 @@ export default function DrawerMenu() {
                   pressed && styles.navItemPressed,
                 ]}
                 onPress={() => handleNav(item.name)}
+                accessibilityLabel={item.label}
+                accessibilityRole="button"
+                accessibilityState={{ selected: activeRouteName === item.name }}
               >
                 <Ionicons
                   name={item.icon}
@@ -216,6 +219,8 @@ export default function DrawerMenu() {
                 pressed && styles.logoutBtnPressed,
               ]}
               onPress={handleLogout}
+              accessibilityLabel="Cerrar sesion"
+              accessibilityRole="button"
             >
               <Ionicons
                 name="log-out-outline"
@@ -358,7 +363,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: f.base,
     fontWeight: "700",
-    color: "#fff",
+    color: colors.primaryForeground,
   },
   profileInfo: {
     flex: 1,
@@ -384,7 +389,7 @@ const styles = StyleSheet.create({
     marginTop: s.sm,
   },
   logoutBtnPressed: {
-    backgroundColor: "rgba(239,68,68,0.08)",
+    backgroundColor: colors.destructiveMuted,
   },
   logoutText: {
     fontSize: f.base,

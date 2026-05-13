@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { colors } from "../theme/colors";
 
 interface MapPinProps {
   readonly color: string;
@@ -50,7 +51,7 @@ const styles = StyleSheet.create({
     width: 30,
   },
   label: {
-    color: "#ffffff",
+    color: colors.primaryForeground,
     fontWeight: "700",
   },
   labelSmall: {

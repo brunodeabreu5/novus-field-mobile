@@ -8,15 +8,18 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { useAuth } from "../contexts/AuthContext";
 import { colors } from "../theme/colors";
+import { useTheme } from "../contexts/ThemeContext";
 import { spacing, fontSize, radius } from "../theme/spacing";
 import { reportsData, VendorPerformance, ClientCoverage, AIAnalysis } from "../lib/data/reports-data";
 
 type ReportTab = "performance" | "coverage" | "ai";
 
 export default function ReportsScreen() {
+  const { colors } = useTheme();
   const { user, isManagerOrAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<ReportTab>("performance");
   const [loading, setLoading] = useState(false);
@@ -197,7 +200,7 @@ export default function ReportsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Reportes</Text>
       </View>
@@ -242,7 +245,7 @@ export default function ReportsScreen() {
           {activeTab === "ai" && isManagerOrAdmin && renderAI()}
         </ScrollView>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 

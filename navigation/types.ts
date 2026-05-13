@@ -19,10 +19,12 @@ export type ManagerStackParamList = {
   AlertConfig: undefined;
   VisitSettings: undefined;
   Reports: undefined;
+  TrackingDiagnostics: undefined;
 };
 
 export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList>;
   Login: undefined;
   TenantBootstrap: undefined;
+  TrackingDiagnostics: undefined;
 };

@@ -12,6 +12,7 @@ import {
   Alert,
   ScrollView,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   showError,
   showSuccess,
@@ -318,7 +319,7 @@ export default function ChargesScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <TextInput
           style={styles.search}
@@ -474,7 +475,7 @@ export default function ChargesScreen() {
           </ScrollView>
         )}
       </BottomSheetModal>
-    </View>
+    </SafeAreaView>
   );
 }
 

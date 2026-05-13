@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { NativeModules, View, Text, StyleSheet } from "react-native";
 import { colors } from "../theme/colors";
 
 // Lazy load the map library
@@ -13,6 +13,11 @@ function loadMapLibre() {
   }
 
   try {
+    if (!NativeModules.MLRNModule) {
+      loadError = new Error("MapLibre native module unavailable");
+      return;
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     MapLibreModule = require("@maplibre/maplibre-react-native");
   } catch (e) {
@@ -23,9 +28,6 @@ function loadMapLibre() {
     loadError = e as Error;
   }
 }
-
-// Pre-load on module evaluation (will be caught by our state)
-loadMapLibre();
 
 interface MapViewWrapperProps {
   children: (
@@ -42,14 +44,12 @@ export default function MapViewWrapper({
   const [error, setError] = useState<Error | null>(loadError);
 
   useEffect(() => {
-    // Try loading again in case it wasn't available initially
-    if (!MapLibreModule && !loadError) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        MapLibreModule = require("@maplibre/maplibre-react-native");
+    if (!MapLibreModule) {
+      loadMapLibre();
+      if (MapLibreModule) {
         setIsReady(true);
-      } catch (e) {
-        loadError = e as Error;
+      }
+      if (loadError) {
         setError(loadError);
       }
     }

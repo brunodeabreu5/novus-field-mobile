@@ -24,5 +24,4 @@ export {
   useVendorRouteHistory,
   useVendorPositions,
   useVendorsData,
-  useVendorPositionsSubscription,
 } from "./data/use-manager-data";

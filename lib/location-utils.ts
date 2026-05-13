@@ -58,7 +58,7 @@ export async function getFreshCurrentPosition(options: {
 } = {}) {
   try {
     const location = await Location.getCurrentPositionAsync({
-      accuracy: options.accuracy ?? Location.Accuracy.High,
+      accuracy: options.accuracy ?? Location.Accuracy.BestForNavigation,
       mayShowUserSettingsDialog: true,
     });
 

@@ -9,15 +9,10 @@ import {
   TextInput,
   Alert,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { showError, showSuccess, logError } from "../lib/error-handler";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  Camera,
-  type CameraRef,
-  MapView,
-  PointAnnotation,
-} from "@maplibre/maplibre-react-native";
 import * as Location from "expo-location";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -28,6 +23,7 @@ import {
 import { useDevicePermissions } from "../contexts/DevicePermissionsContext";
 import type { Client } from "../lib/mobile-data";
 import BottomSheetModal from "../components/BottomSheetModal";
+import MapViewWrapper from "../components/MapViewWrapper";
 import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
 import MapPin from "../components/MapPin";
@@ -36,6 +32,7 @@ import { geocodeAddress } from "../lib/geocoding";
 import { getMapTokenWarning, getMapboxMapStyle } from "../lib/mapbox-tiles";
 import { clientSchema, type ClientFormData } from "../lib/schemas";
 import { colors } from "../theme/colors";
+import { useTheme } from "../contexts/ThemeContext";
 
 const isValidEmail = (email: string): boolean => {
   if (!email.trim()) return true;
@@ -139,8 +136,9 @@ async function resolveCurrentLocation() {
 }
 
 export default function ClientsScreen() {
+  const { colors } = useTheme();
   const { user } = useAuth();
-  const cameraRef = useRef<CameraRef | null>(null);
+  const cameraRef = useRef<any>(null);
   const { data: clients = [], isLoading } = useClientsData();
   const createClientMutation = useCreateClient();
   const updateClientMutation = useUpdateClient();
@@ -473,6 +471,59 @@ export default function ClientsScreen() {
         ] as [number, number])
       : null;
 
+  const renderLocationPickerMap = (annotationId: string) => (
+    <MapViewWrapper
+      fallback={
+        <View style={styles.mapUnavailable}>
+          <Text style={styles.mapUnavailableTitle}>Mapa no disponible</Text>
+          <Text style={styles.mapUnavailableText}>
+            Esta compilacion no registró el modulo nativo de mapa. Rebuilda e
+            reinstala el app para usar el selector visual de ubicacion.
+          </Text>
+        </View>
+      }
+    >
+      {(mapLibre) => {
+        const { MapView, Camera, PointAnnotation } = mapLibre;
+
+        return (
+          <MapView
+            style={styles.map}
+            mapStyle={mapboxMapStyle}
+            onPress={handleMapPress}
+            scrollEnabled
+            zoomEnabled
+            pitchEnabled={false}
+            rotateEnabled={false}
+            logoEnabled={false}
+            attributionEnabled={false}
+          >
+            <Camera
+              ref={cameraRef}
+              defaultSettings={{
+                centerCoordinate: [
+                  pickerViewport.longitude,
+                  pickerViewport.latitude,
+                ],
+                zoomLevel: pickerViewport.zoomLevel,
+              }}
+            />
+            {selectedCoordinate ? (
+              <PointAnnotation
+                id={annotationId}
+                coordinate={selectedCoordinate}
+                draggable
+                onDragEnd={handleMarkerDragEnd}
+              >
+                <MapPin color={colors.primary} />
+              </PointAnnotation>
+            ) : null}
+          </MapView>
+        );
+      }}
+    </MapViewWrapper>
+  );
+
   const renderClient = ({ item }: { item: Client }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
@@ -497,7 +548,7 @@ export default function ClientsScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <TextInput
           style={styles.search}
@@ -663,38 +714,7 @@ export default function ClientsScreen() {
 
         {formLatitude && formLongitude ? (
           <View style={styles.mapWrapper}>
-            <MapView
-              style={styles.map}
-              mapStyle={mapboxMapStyle}
-              onPress={handleMapPress}
-              scrollEnabled
-              zoomEnabled
-              pitchEnabled={false}
-              rotateEnabled={false}
-              logoEnabled={false}
-              attributionEnabled={false}
-            >
-              <Camera
-                ref={cameraRef}
-                defaultSettings={{
-                  centerCoordinate: [
-                    pickerViewport.longitude,
-                    pickerViewport.latitude,
-                  ],
-                  zoomLevel: pickerViewport.zoomLevel,
-                }}
-              />
-              {selectedCoordinate ? (
-                <PointAnnotation
-                  id="client-location"
-                  coordinate={selectedCoordinate}
-                  draggable
-                  onDragEnd={handleMarkerDragEnd}
-                >
-                  <MapPin color={colors.primary} />
-                </PointAnnotation>
-              ) : null}
-            </MapView>
+            {renderLocationPickerMap("client-location")}
             <Text style={styles.coordinatesLabel}>
               Mueva el pin para ajustar la ubicacion exacta del cliente.
             </Text>
@@ -715,38 +735,7 @@ export default function ClientsScreen() {
           </View>
         ) : (
           <View style={styles.mapWrapper}>
-            <MapView
-              style={styles.map}
-              mapStyle={mapboxMapStyle}
-              onPress={handleMapPress}
-              scrollEnabled
-              zoomEnabled
-              pitchEnabled={false}
-              rotateEnabled={false}
-              logoEnabled={false}
-              attributionEnabled={false}
-            >
-              <Camera
-                ref={cameraRef}
-                defaultSettings={{
-                  centerCoordinate: [
-                    pickerViewport.longitude,
-                    pickerViewport.latitude,
-                  ],
-                  zoomLevel: pickerViewport.zoomLevel,
-                }}
-              />
-              {selectedCoordinate ? (
-                <PointAnnotation
-                  id="client-location-empty"
-                  coordinate={selectedCoordinate}
-                  draggable
-                  onDragEnd={handleMarkerDragEnd}
-                >
-                  <MapPin color={colors.primary} />
-                </PointAnnotation>
-              ) : null}
-            </MapView>
+            {renderLocationPickerMap("client-location-empty")}
             <Text style={styles.coordinatesLabel}>
               Toque el mapa, use GPS o busque por direccion para colocar el pin
               del cliente.
@@ -785,7 +774,7 @@ export default function ClientsScreen() {
           onSubmit={handleSaveClient}
         />
       </BottomSheetModal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -815,7 +804,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: 12,
   },
-  addBtnText: { color: "#fff", fontWeight: "600" },
+  addBtnText: { color: colors.primaryForeground, fontWeight: "600" },
   loader: { marginTop: 32 },
   list: { padding: 16, paddingBottom: 32 },
   empty: { textAlign: "center", color: colors.mutedForeground, marginTop: 32 },
@@ -924,6 +913,27 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     overflow: "hidden",
+  },
+  mapUnavailable: {
+    height: 220,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    backgroundColor: colors.card,
+    marginBottom: 10,
+  },
+  mapUnavailableTitle: {
+    color: colors.foreground,
+    fontWeight: "700",
+    fontSize: 15,
+    marginBottom: 6,
+  },
+  mapUnavailableText: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
   },
   map: {
     height: 220,

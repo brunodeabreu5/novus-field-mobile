@@ -11,6 +11,7 @@ import {
   Image,
   TextInput,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   getErrorMessage,
   isRetryableError,
@@ -58,6 +59,7 @@ import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
 import { visitSchema, type VisitFormData } from "../lib/schemas";
 import { colors } from "../theme/colors";
+import { useTheme } from "../contexts/ThemeContext";
 import { spacing, fontSize, radius } from "../theme/spacing";
 const s = spacing;
 const f = fontSize;
@@ -305,6 +307,7 @@ function VisitTypePickerContent({
 }
 
 export default function VisitsScreen() {
+  const { colors } = useTheme();
   const { user, profile } = useAuth();
   const queryClient = useQueryClient();
   const [modalVisible, setModalVisible] = useState(false);
@@ -1297,7 +1300,7 @@ export default function VisitsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={[
@@ -1387,7 +1390,7 @@ export default function VisitsScreen() {
           <Text style={styles.typeOptionText}>Adjuntar documento</Text>
         </TouchableOpacity>
       </BottomSheetModal>
-    </View>
+    </SafeAreaView>
   );
 }
 

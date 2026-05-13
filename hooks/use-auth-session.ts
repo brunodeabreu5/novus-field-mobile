@@ -7,6 +7,7 @@ import {
   isProfileDismissed,
 } from "../lib/auth-data";
 import type { AppRole, Profile } from "../contexts/AuthContext";
+import { logger } from "../lib/logger";
 import {
   type AuthSession as Session,
   type AuthSnapshot,
@@ -45,7 +46,7 @@ export function useAuthSession() {
     try {
       const count = await syncQueuedActions();
       if (count > 0) {
-        console.log(`[Sync] Synced ${count} pending actions`);
+        logger.debug("Sync", `Synced ${count} pending action(s)`);
       }
       return count;
     } finally {

@@ -140,7 +140,7 @@ async function initializeTrackingSession(
     }
 
     await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
-      accuracy: Location.Accuracy.Highest,
+      accuracy: Location.Accuracy.BestForNavigation,
       timeInterval: TRACKING_INTERVAL_MS,
       distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
       deferredUpdatesDistance: TRACKING_BACKGROUND_DISPLACEMENT_M,
@@ -300,7 +300,7 @@ export function useVendorTracking(options: {
 
       foregroundSubscription = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.High,
+          accuracy: Location.Accuracy.BestForNavigation,
           timeInterval: TRACKING_INTERVAL_MS,
           distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
           mayShowUserSettingsDialog: true,

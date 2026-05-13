@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigation } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -11,6 +12,7 @@ import {
   type StyleProp,
   type TextStyle,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useAuth } from "../contexts/AuthContext";
@@ -20,8 +22,11 @@ import type { PermissionState } from "../hooks/use-device-permissions-state";
 import FormActions from "../components/FormActions";
 import FormField from "../components/FormField";
 import { useTrackingStatus, type TrackingState } from "../providers/TrackingProvider";
+import type { ManagerStackParamList } from "../navigation/types";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { profileSchema, type ProfileFormData } from "../lib/schemas";
 import { colors } from "../theme/colors";
+import { useTheme } from "../contexts/ThemeContext";
 
 interface SecuritySectionProps {
   readonly biometricAvailable: boolean;
@@ -439,12 +444,20 @@ function DeviceSection({
   );
 }
 
+type TrackingDiagnosticsNavigationProp = NativeStackNavigationProp<
+  ManagerStackParamList,
+  "ManagerHome"
+>;
+
 export default function AccountScreen() {
+  const { colors } = useTheme();
+  const navigation = useNavigation<TrackingDiagnosticsNavigationProp>();
   const {
     user,
     profile,
     signOut,
     updateProfile,
+    isVendor,
     biometricAvailable,
     biometricEnrolled,
     biometricEnabled,
@@ -559,7 +572,8 @@ export default function AccountScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.content}>
       <View style={styles.avatarBox}>
         <Text style={styles.avatarText}>
           {(profile?.full_name || user?.email || "?")[0].toUpperCase()}
@@ -673,6 +687,17 @@ export default function AccountScreen() {
         requestNotificationPermission={requestNotificationPermission}
       />
 
+      {isVendor && (
+        <TouchableOpacity
+          style={[styles.editBtn, { marginTop: 12, backgroundColor: colors.card }]}
+          onPress={() => navigation.navigate("TrackingDiagnostics")}
+        >
+          <Text style={[styles.editBtnText, { color: colors.primary }]}>
+            Diagnostico de rastreo
+          </Text>
+        </TouchableOpacity>
+      )}
+
       <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
         <Text style={styles.signOutText}>Cerrar sesion</Text>
       </TouchableOpacity>
@@ -680,7 +705,8 @@ export default function AccountScreen() {
       <TouchableOpacity style={styles.switchTenantBtn} onPress={handleChangeTenant}>
         <Text style={styles.switchTenantText}>Cambiar empresa</Text>
       </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -697,7 +723,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 12,
   },
-  avatarText: { fontSize: 32, color: "#fff", fontWeight: "600" },
+  avatarText: { fontSize: 32, color: colors.primaryForeground, fontWeight: "600" },
   email: {
     fontSize: 16,
     color: colors.mutedForeground,
@@ -720,7 +746,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
   },
-  editBtnText: { color: "#fff", fontWeight: "600" },
+  editBtnText: { color: colors.primaryForeground, fontWeight: "600" },
   testSection: {
     marginTop: 32,
     paddingTop: 24,
@@ -790,7 +816,7 @@ const styles = StyleSheet.create({
   testBtnPrimary: {
     backgroundColor: colors.primary,
   },
-  testBtnTextPrimary: { fontSize: 14, color: "#fff", fontWeight: "600" },
+  testBtnTextPrimary: { fontSize: 14, color: colors.primaryForeground, fontWeight: "600" },
   signOutBtn: {
     marginTop: 32,
     padding: 14,

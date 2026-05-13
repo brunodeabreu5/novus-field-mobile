@@ -13,6 +13,7 @@ import { getAccessToken } from "../lib/backend-auth";
 import { logger } from "../lib/logger";
 import { getBackendWsUrl } from "../lib/tenant-config";
 import { useAuth } from "../contexts/AuthContext";
+import { useNetwork } from "../contexts/NetworkContext";
 
 interface ChatMessage {
   id: string;
@@ -53,11 +54,13 @@ export function setGlobalRefetchChat(callback: () => void) {
 
 export function ChatSocketProvider({ children }: ChatSocketProviderProps) {
   const { user, session, loading } = useAuth();
+  const { isOnline } = useNetwork();
 
   const [isConnected, setIsConnected] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [lastMessage, setLastMessage] = useState<ChatMessage | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const wasOnlineRef = useRef(isOnline);
 
   const refetchChat = useCallback(() => {
     // Call global callback if set
@@ -69,6 +72,11 @@ export function ChatSocketProvider({ children }: ChatSocketProviderProps) {
   const connect = useCallback(async () => {
     if (!user || !session) {
       logger.debug("ChatSocket", "No user/session, skipping connect");
+      return;
+    }
+
+    if (appStateRef.current !== "active") {
+      logger.debug("ChatSocket", "App inactive, skipping connect");
       return;
     }
 
@@ -171,7 +179,12 @@ export function ChatSocketProvider({ children }: ChatSocketProviderProps) {
 
       // Reconnect when app comes to foreground
       if (wasBackground && isActive && user && session) {
-        connect();
+        void connect();
+        return;
+      }
+
+      if (!isActive) {
+        disconnect();
       }
     };
 
@@ -183,7 +196,16 @@ export function ChatSocketProvider({ children }: ChatSocketProviderProps) {
     return () => {
       subscription.remove();
     };
-  }, [user, session, connect]);
+  }, [user, session, connect, disconnect]);
+
+  // Reconnect when network recovers while app is active
+  useEffect(() => {
+    if (isOnline && !wasOnlineRef.current && appStateRef.current === "active") {
+      logger.debug("ChatSocket", "Network recovered — reconnecting");
+      void connect();
+    }
+    wasOnlineRef.current = isOnline;
+  }, [isOnline, connect]);
 
   // Cleanup on unmount
   useEffect(() => {

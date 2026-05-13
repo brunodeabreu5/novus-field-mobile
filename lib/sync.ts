@@ -39,6 +39,9 @@ const ACTION_PRIORITY: Record<QueuedAction["type"], number> = {
 // Maximum positions to send in a single batch request
 const TRACKING_BATCH_SIZE = 50;
 
+// Maximum retries before giving up on a queued action
+const MAX_RETRIES = 10;
+
 interface SyncQueuedActionsOptions {
   allowedTypes?: QueuedAction["type"][];
   allowedIds?: string[];
@@ -125,10 +128,23 @@ async function runQueuedSync(
     return true;
   });
 
-  if (filteredQueue.length === 0) return 0;
+  // Filter out items that exceeded max retries or are waiting for backoff
+  const now = Date.now();
+  const eligibleQueue = filteredQueue.filter((item) => {
+    if (item.retries >= MAX_RETRIES) {
+      logger.warn("Sync", `Item ${item.id} exceeded max retries (${MAX_RETRIES}), skipping`);
+      return false;
+    }
+    if (item.nextRetryAt && new Date(item.nextRetryAt).getTime() > now) {
+      return false;
+    }
+    return true;
+  });
+
+  if (eligibleQueue.length === 0) return 0;
 
   // Sort by priority (lower number = higher priority)
-  filteredQueue.sort((a, b) => {
+  eligibleQueue.sort((a, b) => {
     const priorityA = ACTION_PRIORITY[a.type] ?? 999;
     const priorityB = ACTION_PRIORITY[b.type] ?? 999;
     if (priorityA !== priorityB) {
@@ -142,10 +158,10 @@ async function runQueuedSync(
   const errors: string[] = [];
 
   // Process tracking positions in batch
-  const trackingActions = filteredQueue.filter(
+  const trackingActions = eligibleQueue.filter(
     (a): a is VendorPositionAction => a.type === "vendor_position",
   );
-  const nonTrackingActions = filteredQueue.filter(
+  const nonTrackingActions = eligibleQueue.filter(
     (a) => a.type !== "vendor_position",
   );
 

@@ -1,9 +1,12 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import {
+  View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { ManagerStackParamList } from "../navigation/types";
 import { colors } from "../theme/colors";
+import { useTheme } from "../contexts/ThemeContext";
 import { spacing, fontSize, radius } from "../theme/spacing";
 
 const CARDS = [
@@ -40,11 +43,12 @@ const CARDS = [
 ] as const;
 
 export default function ManagerHomeScreen() {
+  const { colors } = useTheme();
   const navigation =
     useNavigation<NativeStackNavigationProp<ManagerStackParamList, "ManagerHome">>();
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
       {CARDS.map((card) => (
         <TouchableOpacity
           key={card.route}
@@ -55,7 +59,7 @@ export default function ManagerHomeScreen() {
           <Text style={styles.desc}>{card.description}</Text>
         </TouchableOpacity>
       ))}
-    </View>
+    </SafeAreaView>
   );
 }
 
