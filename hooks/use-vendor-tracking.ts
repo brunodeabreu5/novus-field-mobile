@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
+import { Platform } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import { isExpectedAuthError } from "../lib/auth-errors";
 import { logger } from "../lib/logger";
@@ -19,9 +20,12 @@ import {
   type TrackingStatusMode,
 } from "../lib/vendor-tracking-core";
 import {
+  TRACKING_ANDROID_BACKGROUND_DISPLACEMENT_M,
+  TRACKING_ANDROID_BACKGROUND_INTERVAL_MS,
   TRACKING_BACKGROUND_DISPLACEMENT_M,
   TRACKING_CACHE_MAX_AGE_MS,
-  TRACKING_HEARTBEAT_MS,
+  TRACKING_BACKGROUND_HEARTBEAT_MS,
+  TRACKING_FOREGROUND_HEARTBEAT_MS,
   TRACKING_INTERVAL_MS,
   TRACKING_LAST_LOCATION_KEY,
   TRACKING_TASK_NAME,
@@ -44,12 +48,43 @@ async function runHeartbeatTick(
   trackingMode: TrackingMode,
   handlers: TrackingLifecycleHandlers
 ) {
+  const lastPositionAt = handlers.lastLocationRef.current?.timestamp
+    ? new Date(handlers.lastLocationRef.current.timestamp).toISOString()
+    : null;
   const heartbeatPayload = {
     trackingMode,
-    lastPositionAt: handlers.lastLocationRef.current?.timestamp
-      ? new Date(handlers.lastLocationRef.current.timestamp).toISOString()
-      : null,
+    lastPositionAt,
   } as const;
+
+  if (trackingMode === "background") {
+    try {
+      await publishTrackingHeartbeat(vendorId, heartbeatPayload);
+      if (handlers.active()) {
+        handlers.setError(null);
+        handlers.setTrackingState("background");
+      }
+    } catch (heartbeatError) {
+      if (isExpectedAuthError(heartbeatError)) {
+        handlers.pauseTrackingNetwork();
+        if (handlers.active()) {
+          handlers.setError(null);
+          handlers.setTrackingState("background");
+        }
+        return;
+      }
+
+      const nextError =
+        heartbeatError instanceof Error
+          ? heartbeatError.message
+          : "Tracking heartbeat error";
+      if (handlers.active()) {
+        handlers.setError(nextError);
+        handlers.setTrackingState("error");
+      }
+    }
+
+    return;
+  }
 
   if (!handlers.lastLocationRef.current) {
     const currentLocation = await resolveCurrentLocation(vendorId, TRACKING_CACHE_MAX_AGE_MS);
@@ -140,14 +175,27 @@ async function initializeTrackingSession(
     }
 
     await Location.startLocationUpdatesAsync(TRACKING_TASK_NAME, {
-      accuracy: Location.Accuracy.BestForNavigation,
-      timeInterval: TRACKING_INTERVAL_MS,
-      distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
-      deferredUpdatesDistance: TRACKING_BACKGROUND_DISPLACEMENT_M,
-      deferredUpdatesInterval: TRACKING_INTERVAL_MS,
+      accuracy:
+        Platform.OS === "android"
+          ? Location.Accuracy.High
+          : Location.Accuracy.BestForNavigation,
+      timeInterval:
+        Platform.OS === "android"
+          ? TRACKING_ANDROID_BACKGROUND_INTERVAL_MS
+          : TRACKING_INTERVAL_MS,
+      distanceInterval:
+        Platform.OS === "android"
+          ? TRACKING_ANDROID_BACKGROUND_DISPLACEMENT_M
+          : TRACKING_BACKGROUND_DISPLACEMENT_M,
+      deferredUpdatesDistance:
+        Platform.OS === "android" ? TRACKING_ANDROID_BACKGROUND_DISPLACEMENT_M : 0,
+      deferredUpdatesInterval:
+        Platform.OS === "android"
+          ? TRACKING_ANDROID_BACKGROUND_INTERVAL_MS
+          : 0,
       mayShowUserSettingsDialog: true,
       pausesUpdatesAutomatically: false,
-      showsBackgroundLocationIndicator: true,
+      showsBackgroundLocationIndicator: Platform.OS === "ios",
       activityType: Location.ActivityType.OtherNavigation,
       foregroundService: {
         notificationTitle: NOTIFICATION_TEXTS.tracking.foregroundService.title,
@@ -254,6 +302,10 @@ export function useVendorTracking(options: {
 
     const startHeartbeatLoop = (trackingMode: TrackingMode) => {
       stopHeartbeatLoop();
+      const intervalMs =
+        trackingMode === "background"
+          ? TRACKING_BACKGROUND_HEARTBEAT_MS
+          : TRACKING_FOREGROUND_HEARTBEAT_MS;
 
       heartbeatTimerRef.current = setInterval(() => {
         void runHeartbeatTick(vendorId!, trackingMode, {
@@ -264,7 +316,7 @@ export function useVendorTracking(options: {
           setTrackingState,
           startHeartbeatLoop,
         });
-      }, TRACKING_HEARTBEAT_MS);
+      }, intervalMs);
     };
 
     const handleForegroundLocation = async (
@@ -298,9 +350,12 @@ export function useVendorTracking(options: {
         foregroundSubscription = null;
       }
 
-      foregroundSubscription = await Location.watchPositionAsync(
+        foregroundSubscription = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.BestForNavigation,
+          accuracy:
+            Platform.OS === "android"
+              ? Location.Accuracy.High
+              : Location.Accuracy.BestForNavigation,
           timeInterval: TRACKING_INTERVAL_MS,
           distanceInterval: TRACKING_BACKGROUND_DISPLACEMENT_M,
           mayShowUserSettingsDialog: true,

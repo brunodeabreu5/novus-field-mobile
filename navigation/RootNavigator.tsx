@@ -38,6 +38,16 @@ type ChatNotificationTarget = {
   messageId?: string;
 };
 
+type NotificationTarget =
+  | {
+      type: "chat";
+      contactId?: string;
+      messageId?: string;
+    }
+  | {
+      type: "manager-alert";
+    };
+
 function readStringPayloadValue(data: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = data[key];
@@ -250,15 +260,20 @@ function ManagerStackScreen() {
 
 export default function RootNavigator() {
   const { configured } = useTenant();
-  const { session, loading, biometricLoading, biometricRequired } = useAuth();
+  const { session, loading, biometricLoading, biometricRequired, isManagerOrAdmin } =
+    useAuth();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
-  const pendingChatNotificationRef = useRef<ChatNotificationTarget | null>(null);
+  const pendingNotificationRef = useRef<NotificationTarget | null>(null);
 
   const navigateToChatNotification = useCallback(
     (target?: ChatNotificationTarget | null) => {
       if (!target?.contactId && !target?.messageId) return;
       if (!navigationRef.isReady()) {
-        pendingChatNotificationRef.current = target;
+        pendingNotificationRef.current = {
+          type: "chat",
+          contactId: target.contactId,
+          messageId: target.messageId,
+        };
         return;
       }
 
@@ -270,9 +285,40 @@ export default function RootNavigator() {
     [navigationRef]
   );
 
+  const navigateToManagerAlertNotification = useCallback(() => {
+    if (!isManagerOrAdmin) {
+      return;
+    }
+
+    if (!navigationRef.isReady()) {
+      pendingNotificationRef.current = { type: "manager-alert" };
+      return;
+    }
+
+    navigationRef.navigate("Main", {
+      screen: "Manager",
+      params: {
+        screen: "Alerts",
+      },
+    });
+  }, [isManagerOrAdmin, navigationRef]);
+
   const handleNotificationData = useCallback(
     (data: Record<string, unknown> | undefined) => {
-      if (!session || data?.type !== "chat") {
+      if (!session || !data?.type) {
+        return;
+      }
+
+      if (
+        data.type === "geofence" ||
+        data.type === "manager_notification" ||
+        data.type === "vendor_offline"
+      ) {
+        navigateToManagerAlertNotification();
+        return;
+      }
+
+      if (data.type !== "chat") {
         return;
       }
 
@@ -286,12 +332,12 @@ export default function RootNavigator() {
 
       navigateToChatNotification({ contactId, messageId });
     },
-    [navigateToChatNotification, session]
+    [navigateToChatNotification, navigateToManagerAlertNotification, session]
   );
 
   useEffect(() => {
     if (!session) {
-      pendingChatNotificationRef.current = null;
+      pendingNotificationRef.current = null;
       return;
     }
 
@@ -348,10 +394,15 @@ export default function RootNavigator() {
     <NavigationContainer
       ref={navigationRef}
       onReady={() => {
-        if (pendingChatNotificationRef.current) {
-          const target = pendingChatNotificationRef.current;
-          pendingChatNotificationRef.current = null;
-          navigateToChatNotification(target);
+        if (pendingNotificationRef.current) {
+          const target = pendingNotificationRef.current;
+          pendingNotificationRef.current = null;
+          if (target.type === "chat") {
+            navigateToChatNotification(target);
+            return;
+          }
+
+          navigateToManagerAlertNotification();
         }
       }}
     >

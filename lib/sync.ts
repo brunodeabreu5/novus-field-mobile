@@ -7,6 +7,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import { logger } from "./logger";
 import {
   type ChargeCreateAction,
+  type ChargeStatusUpdateAction,
+  type ChargeUpdateAction,
   type ChatSendAction,
   type ClientCreateAction,
   type ClientUpdateAction,
@@ -32,6 +34,8 @@ const ACTION_PRIORITY: Record<QueuedAction["type"], number> = {
   client_create: 4,
   client_update: 4,
   charge_create: 5,
+  charge_update: 5,
+  charge_status_update: 5,
   chat_send: 6,
   visit_attachment_upload: 7,
 };
@@ -327,6 +331,12 @@ async function syncAction(action: QueuedAction): Promise<boolean> {
       case "charge_create":
         await syncChargeCreate(action);
         return true;
+      case "charge_update":
+        await syncChargeUpdate(action);
+        return true;
+      case "charge_status_update":
+        await syncChargeStatusUpdate(action);
+        return true;
       case "chat_send":
         await syncChatSend(action);
         return true;
@@ -369,9 +379,18 @@ async function resolveRemoteVisitId(visitId: string) {
   return (await offlineStorage.getVisitMapping(visitId)) ?? visitId;
 }
 
+async function resolveRemoteClientId(clientId: string | null) {
+  if (!clientId) {
+    return null;
+  }
+
+  return (await offlineStorage.getClientMapping(clientId)) ?? clientId;
+}
+
 async function fetchClient(clientId: string) {
+  const resolvedClientId = await resolveRemoteClientId(clientId);
   try {
-    return await backendApi.get<{ id: string }>(`/clients/${clientId}`);
+    return await backendApi.get<{ id: string }>(`/clients/${resolvedClientId}`);
   } catch (error) {
     if (error instanceof Error && error.message.includes("404")) {
       return null;
@@ -480,7 +499,7 @@ async function syncManualVisitCreate(
   }
 
   const created = await postVisit({
-    clientId: payload.clientId,
+    clientId: await resolveRemoteClientId(payload.clientId),
     clientName: payload.clientName,
     timestamp: payload.timestamp,
     notes: payload.notes,
@@ -501,7 +520,7 @@ async function syncClientCreate(action: ClientCreateAction): Promise<void> {
     return;
   }
 
-  await backendApi.post("/clients", {
+  const created = await backendApi.post<{ id: string }>("/clients", {
     name: payload.name,
     document: payload.document,
     phone: payload.phone,
@@ -511,6 +530,10 @@ async function syncClientCreate(action: ClientCreateAction): Promise<void> {
     latitude: payload.latitude,
     longitude: payload.longitude,
   });
+
+  if (created.id && created.id !== payload.clientId) {
+    await offlineStorage.setClientMapping(payload.clientId, created.id);
+  }
 }
 
 async function syncClientUpdate(action: ClientUpdateAction): Promise<void> {
@@ -522,7 +545,8 @@ async function syncClientUpdate(action: ClientUpdateAction): Promise<void> {
     throw new SyncNotFoundError(payload.clientId);
   }
 
-  await backendApi.patch(`/clients/${payload.clientId}`, {
+  const resolvedClientId = await resolveRemoteClientId(payload.clientId);
+  await backendApi.patch(`/clients/${resolvedClientId}`, {
     name: payload.name,
     document: payload.document,
     phone: payload.phone,
@@ -543,13 +567,47 @@ async function syncChargeCreate(action: ChargeCreateAction): Promise<void> {
   }
 
   await backendApi.post("/charges", {
-    client_id: payload.clientId,
+    client_id: await resolveRemoteClientId(payload.clientId),
     client_name: payload.clientName,
     amount: payload.amount,
     currency: "PYG",
     due_date: payload.dueDate,
     notes: payload.notes,
     status: "pendiente",
+  });
+}
+
+async function syncChargeUpdate(action: ChargeUpdateAction): Promise<void> {
+  const { payload } = action;
+  const existing = await fetchCharge(payload.chargeId);
+
+  if (!existing) {
+    logger.warn("Sync", "Charge not found for update:", payload.chargeId);
+    throw new SyncNotFoundError(payload.chargeId);
+  }
+
+  await backendApi.patch(`/charges/${payload.chargeId}`, {
+    client_id: await resolveRemoteClientId(payload.clientId),
+    client_name: payload.clientName,
+    amount: payload.amount,
+    due_date: payload.dueDate,
+    notes: payload.notes,
+  });
+}
+
+async function syncChargeStatusUpdate(
+  action: ChargeStatusUpdateAction,
+): Promise<void> {
+  const { payload } = action;
+  const existing = await fetchCharge(payload.chargeId);
+
+  if (!existing) {
+    logger.warn("Sync", "Charge not found for status update:", payload.chargeId);
+    throw new SyncNotFoundError(payload.chargeId);
+  }
+
+  await backendApi.patch(`/charges/${payload.chargeId}/status`, {
+    status: payload.status,
   });
 }
 

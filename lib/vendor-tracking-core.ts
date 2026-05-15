@@ -10,6 +10,8 @@ import { logger } from "./logger";
 import {
   recordBackgroundDelivery,
   recordBackgroundError,
+  recordTrackingHeartbeat,
+  recordTrackingPosition,
 } from "./tracking-diagnostics";
 import { refreshStoredAuthSession } from "./backend-auth";
 import {
@@ -319,7 +321,7 @@ export async function publishTrackingHeartbeat(
     lastError?: string | null;
   },
 ) {
-  await backendApi
+  const result = await backendApi
     .post("/tracking/status", {
       vendor_id: vendorId,
       tracking_mode: payload.trackingMode,
@@ -337,6 +339,14 @@ export async function publishTrackingHeartbeat(
       }
       return null;
     });
+
+  if (!result) {
+    return;
+  }
+
+  await recordTrackingHeartbeat({
+    trackingMode: payload.trackingMode,
+  });
 }
 
 export async function persistPosition(
@@ -451,6 +461,10 @@ export async function persistPosition(
             is_idle: payload.is_idle,
             recorded_at: payload.recorded_at,
           });
+          await recordTrackingPosition({
+            recordedAt: payload.recorded_at,
+            source: `${options.trackingMode}:refresh-retry`,
+          });
           publishTrackingHeartbeat(vendorId, {
             trackingMode: options.trackingMode,
             lastPositionAt: timestampIso,
@@ -504,6 +518,11 @@ export async function persistPosition(
       error instanceof Error ? error.message : "Tracking persistence failed",
     );
   }
+
+  await recordTrackingPosition({
+    recordedAt: payload.recorded_at,
+    source: options.trackingMode,
+  });
 
   publishTrackingHeartbeat(vendorId, {
     trackingMode: options.trackingMode,

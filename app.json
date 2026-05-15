@@ -2,6 +2,7 @@
   "expo": {
     "name": "NovusField",
     "slug": "novus-field",
+    "scheme": "exp+novus-field",
     "description": "Gestión de equipos de ventas en campo con GPS y geofencing",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -46,6 +47,7 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.RECORD_AUDIO"
       ],
       "blockedPermissions": [

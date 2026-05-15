@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const QUEUE_KEY = "novus_sync_queue";
 const VISIT_MAPPING_KEY = "novus_sync_visit_mapping";
+const CLIENT_MAPPING_KEY = "novus_sync_client_mapping";
 
 export interface QueuePosition {
   lat: number;
@@ -83,6 +84,22 @@ export interface ChargeCreatePayload {
   amount: number;
   dueDate: string | null;
   notes: string | null;
+}
+
+export interface ChargeUpdatePayload {
+  chargeId: string;
+  userId: string;
+  clientId: string | null;
+  clientName: string;
+  amount: number;
+  dueDate: string | null;
+  notes: string | null;
+}
+
+export interface ChargeStatusUpdatePayload {
+  chargeId: string;
+  userId: string;
+  status: string;
 }
 
 export interface ChatSendPayload {
@@ -168,6 +185,16 @@ export interface ChargeCreateAction extends QueuedActionBase {
   payload: ChargeCreatePayload;
 }
 
+export interface ChargeUpdateAction extends QueuedActionBase {
+  type: "charge_update";
+  payload: ChargeUpdatePayload;
+}
+
+export interface ChargeStatusUpdateAction extends QueuedActionBase {
+  type: "charge_status_update";
+  payload: ChargeStatusUpdatePayload;
+}
+
 export interface ChatSendAction extends QueuedActionBase {
   type: "chat_send";
   payload: ChatSendPayload;
@@ -191,6 +218,8 @@ export type QueuedAction =
   | ClientCreateAction
   | ClientUpdateAction
   | ChargeCreateAction
+  | ChargeUpdateAction
+  | ChargeStatusUpdateAction
   | ChatSendAction
   | VendorPositionAction
   | VisitAttachmentUploadAction;
@@ -198,6 +227,7 @@ type NewQueuedAction = Omit<QueuedAction, "id" | "createdAt" | "retries">;
 
 let queueCache: QueuedAction[] | null = null;
 let visitMappingCache: Record<string, string> | null = null;
+let clientMappingCache: Record<string, string> | null = null;
 
 async function loadQueue(): Promise<QueuedAction[]> {
   if (queueCache) return queueCache;
@@ -229,6 +259,22 @@ async function loadVisitMapping(): Promise<Record<string, string>> {
 async function saveVisitMapping(mapping: Record<string, string>) {
   visitMappingCache = mapping;
   await AsyncStorage.setItem(VISIT_MAPPING_KEY, JSON.stringify(mapping));
+}
+
+async function loadClientMapping(): Promise<Record<string, string>> {
+  if (clientMappingCache) return clientMappingCache;
+  try {
+    const raw = await AsyncStorage.getItem(CLIENT_MAPPING_KEY);
+    clientMappingCache = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    clientMappingCache = {};
+  }
+  return clientMappingCache;
+}
+
+async function saveClientMapping(mapping: Record<string, string>) {
+  clientMappingCache = mapping;
+  await AsyncStorage.setItem(CLIENT_MAPPING_KEY, JSON.stringify(mapping));
 }
 
 export const offlineStorage = {
@@ -287,8 +333,24 @@ export const offlineStorage = {
     return mapping[localVisitId] ?? null;
   },
 
+  async setClientMapping(localClientId: string, remoteClientId: string) {
+    const mapping = await loadClientMapping();
+    mapping[localClientId] = remoteClientId;
+    await saveClientMapping(mapping);
+  },
+
+  async getClientMapping(localClientId: string) {
+    const mapping = await loadClientMapping();
+    return mapping[localClientId] ?? null;
+  },
+
   async clearVisitMappings() {
     visitMappingCache = {};
     await AsyncStorage.removeItem(VISIT_MAPPING_KEY);
+  },
+
+  async clearClientMappings() {
+    clientMappingCache = {};
+    await AsyncStorage.removeItem(CLIENT_MAPPING_KEY);
   },
 };

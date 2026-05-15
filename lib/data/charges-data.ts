@@ -75,13 +75,49 @@ export async function updateCharge(input: {
   dueDate: string;
   notes: string;
 }) {
-  return backendApi.patch<Charge>(`/charges/${encodeURIComponent(input.chargeId)}`, {
-    client_id: input.clientId || null,
-    client_name: input.clientName.trim(),
-    amount: input.amount,
-    due_date: input.dueDate || null,
-    notes: input.notes.trim() || null,
-  });
+  try {
+    const updated = await backendApi.patch<Charge>(
+      `/charges/${encodeURIComponent(input.chargeId)}`,
+      {
+        client_id: input.clientId || null,
+        client_name: input.clientName.trim(),
+        amount: input.amount,
+        due_date: input.dueDate || null,
+        notes: input.notes.trim() || null,
+      },
+    );
+
+    return { charge: updated, queued: false as const };
+  } catch (error) {
+    if (isOfflineLikeError(error)) {
+      await offlineStorage.enqueue({
+        type: "charge_update",
+        payload: {
+          chargeId: input.chargeId,
+          userId: input.userId,
+          clientId: input.clientId || null,
+          clientName: input.clientName.trim(),
+          amount: input.amount,
+          dueDate: input.dueDate || null,
+          notes: input.notes.trim() || null,
+        },
+      });
+
+      return {
+        charge: {
+          id: input.chargeId,
+          client_id: input.clientId || null,
+          client_name: input.clientName.trim(),
+          amount: input.amount,
+          due_date: input.dueDate || null,
+          notes: input.notes.trim() || null,
+        } as Charge,
+        queued: true as const,
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function updateChargeStatus(input: {
@@ -89,7 +125,35 @@ export async function updateChargeStatus(input: {
   chargeId: string;
   status: string;
 }) {
-  return backendApi.patch<Charge>(`/charges/${encodeURIComponent(input.chargeId)}/status`, {
-    status: input.status,
-  });
+  try {
+    const updated = await backendApi.patch<Charge>(
+      `/charges/${encodeURIComponent(input.chargeId)}/status`,
+      {
+        status: input.status,
+      },
+    );
+
+    return { charge: updated, queued: false as const };
+  } catch (error) {
+    if (isOfflineLikeError(error)) {
+      await offlineStorage.enqueue({
+        type: "charge_status_update",
+        payload: {
+          chargeId: input.chargeId,
+          userId: input.userId,
+          status: input.status,
+        },
+      });
+
+      return {
+        charge: {
+          id: input.chargeId,
+          status: input.status,
+        } as Charge,
+        queued: true as const,
+      };
+    }
+
+    throw error;
+  }
 }

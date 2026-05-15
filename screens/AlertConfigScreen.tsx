@@ -31,7 +31,8 @@ type GeofenceConfig = {
 };
 
 export default function AlertConfigScreen() {
-  const [config, setConfig] = useState<GeofenceConfig | null>(null);
+  const [configs, setConfigs] = useState<GeofenceConfig[]>([]);
+  const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [radiusMeters, setRadiusMeters] = useState("100");
@@ -39,20 +40,16 @@ export default function AlertConfigScreen() {
   const [alertOnExit, setAlertOnExit] = useState(true);
   const [enabled, setEnabled] = useState(true);
 
+  const config =
+    configs.find((item) => item.id === selectedConfigId) ?? configs[0] ?? null;
+
   useEffect(() => {
     async function loadConfig() {
       setLoading(true);
       try {
-        const data =
-          await backendApi.get<GeofenceConfig[]>("/geofence/configs");
-        const first = data[0] || null;
-        setConfig(first);
-        if (first) {
-          setRadiusMeters(String(first.custom_radius_meters ?? 100));
-          setAlertOnEnter(first.alert_on_enter ?? true);
-          setAlertOnExit(first.alert_on_exit ?? true);
-          setEnabled(first.enabled ?? true);
-        }
+        const data = await backendApi.get<GeofenceConfig[]>("/geofence/configs");
+        setConfigs(data);
+        setSelectedConfigId((current) => current ?? data[0]?.id ?? null);
       } catch (error) {
         logError("AlertConfig/load", error);
         showError(error, "Error al cargar configuración");
@@ -62,6 +59,17 @@ export default function AlertConfigScreen() {
     }
     loadConfig();
   }, []);
+
+  useEffect(() => {
+    if (!config) {
+      return;
+    }
+
+    setRadiusMeters(String(config.custom_radius_meters ?? 100));
+    setAlertOnEnter(config.alert_on_enter ?? true);
+    setAlertOnExit(config.alert_on_exit ?? true);
+    setEnabled(config.enabled ?? true);
+  }, [config]);
 
   const handleSave = async () => {
     if (!config) return;
@@ -83,6 +91,19 @@ export default function AlertConfigScreen() {
         alert_on_exit: alertOnExit,
         enabled,
       });
+      setConfigs((current) =>
+        current.map((item) =>
+          item.id === config.id
+            ? {
+                ...item,
+                custom_radius_meters: radius,
+                alert_on_enter: alertOnEnter,
+                alert_on_exit: alertOnExit,
+                enabled,
+              }
+            : item,
+        ),
+      );
       showSuccess("Configuración actualizada correctamente.");
     } catch (error) {
       logError("AlertConfig/save", error);
@@ -123,6 +144,36 @@ export default function AlertConfigScreen() {
         Configura las distancias y notificaciones para alertas de desvío y falta
         de movimiento de los vendedores.
       </Text>
+
+      {configs.length > 1 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Zonas configuradas</Text>
+          <View style={styles.zoneList}>
+            {configs.map((item) => {
+              const selected = item.id === config.id;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[
+                    styles.zoneChip,
+                    selected && styles.zoneChipSelected,
+                  ]}
+                  onPress={() => setSelectedConfigId(item.id)}
+                >
+                  <Text
+                    style={[
+                      styles.zoneChipText,
+                      selected && styles.zoneChipTextSelected,
+                    ]}
+                  >
+                    {item.zone_name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Zona</Text>
@@ -230,6 +281,31 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  zoneList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  zoneChip: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  zoneChipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  zoneChipText: {
+    color: colors.foreground,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  zoneChipTextSelected: {
+    color: colors.primaryForeground,
   },
   sectionTitle: {
     fontSize: 16,

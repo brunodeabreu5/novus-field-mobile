@@ -61,7 +61,9 @@ export function useUpdateCharge() {
         mobileQueryKeys.charges(variables.userId),
         (current = []) =>
           current.map((item) =>
-            item.id === updatedCharge.id ? updatedCharge : item,
+            item.id === updatedCharge.charge.id
+              ? { ...item, ...updatedCharge.charge, queued: updatedCharge.queued }
+              : item,
           ),
       );
       queryClient.invalidateQueries({
@@ -87,7 +89,9 @@ export function useUpdateChargeStatus() {
         mobileQueryKeys.charges(variables.userId),
         (current = []) =>
           current.map((item) =>
-            item.id === updatedCharge.id ? updatedCharge : item,
+            item.id === updatedCharge.charge.id
+              ? { ...item, ...updatedCharge.charge, queued: updatedCharge.queued }
+              : item,
           ),
       );
       queryClient.invalidateQueries({

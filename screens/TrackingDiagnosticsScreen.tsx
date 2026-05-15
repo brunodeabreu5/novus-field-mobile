@@ -9,7 +9,6 @@ import {
   Platform,
 } from "react-native";
 import * as Location from "expo-location";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   loadTrackingDiagnostics,
   type TrackingDiagnostics,
@@ -17,6 +16,7 @@ import {
 import { useBatteryOptimization } from "../hooks/use-battery-optimization";
 import { useTrackingStatus } from "../providers/TrackingProvider";
 import { TRACKING_TASK_NAME } from "../lib/vendor-tracking-constants";
+import { offlineStorage } from "../lib/offline-storage";
 import { colors } from "../theme/colors";
 import { logger } from "../lib/logger";
 
@@ -81,12 +81,11 @@ export default function TrackingDiagnosticsScreen() {
         Location.hasStartedLocationUpdatesAsync(TRACKING_TASK_NAME).catch(
           () => false,
         ),
-        AsyncStorage.getItem("novus_offline_queue"),
+        offlineStorage.getQueue(),
       ]);
       setDiagnostics(diag);
       setBackgroundEnabled(bgStatus);
-      const queue = queueRaw ? (JSON.parse(queueRaw) as unknown[]) : [];
-      setQueueSize(queue.length);
+      setQueueSize(queueRaw.length);
     } catch (error) {
       logger.warn(
         "TrackingDiagnostics",
@@ -220,6 +219,20 @@ export default function TrackingDiagnosticsScreen() {
             <Card
               label="Ultima entrega"
               value={formatDate(diagnostics?.lastDeliveryAt ?? null)}
+            />
+            <Card
+              label="Ultima posicao enviada"
+              value={formatDate(diagnostics?.lastPositionSentAt ?? null)}
+              subtext={
+                diagnostics?.lastPositionRecordedAt
+                  ? `Posicao registrada em ${formatDate(diagnostics.lastPositionRecordedAt)}${diagnostics.lastPositionSource ? ` • ${diagnostics.lastPositionSource}` : ""}`
+                  : diagnostics?.lastPositionSource ?? undefined
+              }
+            />
+            <Card
+              label="Ultimo heartbeat"
+              value={formatDate(diagnostics?.lastHeartbeatAt ?? null)}
+              subtext={diagnostics?.lastHeartbeatMode ?? undefined}
             />
             <Card
               label="Fila offline"

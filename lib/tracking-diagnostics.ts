@@ -17,6 +17,11 @@ export interface TrackingDiagnostics {
   totalDeliveries: number;
   totalFallbacks: number;
   avgIntervalMs: number | null;
+  lastHeartbeatAt: number | null;
+  lastHeartbeatMode: string | null;
+  lastPositionSentAt: number | null;
+  lastPositionRecordedAt: number | null;
+  lastPositionSource: string | null;
   recentDeliveries: TrackingDeliveryLog[];
   lastErrorAt: number | null;
   lastErrorMessage: string | null;
@@ -27,6 +32,11 @@ const DEFAULT_DIAGNOSTICS: TrackingDiagnostics = {
   totalDeliveries: 0,
   totalFallbacks: 0,
   avgIntervalMs: null,
+  lastHeartbeatAt: null,
+  lastHeartbeatMode: null,
+  lastPositionSentAt: null,
+  lastPositionRecordedAt: null,
+  lastPositionSource: null,
   recentDeliveries: [],
   lastErrorAt: null,
   lastErrorMessage: null,
@@ -129,6 +139,37 @@ export async function recordBackgroundError(message: string) {
     const diagnostics = await loadTrackingDiagnostics();
     diagnostics.lastErrorAt = Date.now();
     diagnostics.lastErrorMessage = message;
+    await saveTrackingDiagnostics(diagnostics);
+  } catch {
+    // Silent fail — diagnostics should never break tracking
+  }
+}
+
+export async function recordTrackingHeartbeat(options: {
+  trackingMode: string;
+}) {
+  try {
+    const diagnostics = await loadTrackingDiagnostics();
+    diagnostics.lastHeartbeatAt = Date.now();
+    diagnostics.lastHeartbeatMode = options.trackingMode;
+    await saveTrackingDiagnostics(diagnostics);
+  } catch {
+    // Silent fail — diagnostics should never break tracking
+  }
+}
+
+export async function recordTrackingPosition(options: {
+  recordedAt: string;
+  source: string;
+}) {
+  try {
+    const diagnostics = await loadTrackingDiagnostics();
+    diagnostics.lastPositionSentAt = Date.now();
+    const parsedRecordedAt = new Date(options.recordedAt).getTime();
+    diagnostics.lastPositionRecordedAt = Number.isFinite(parsedRecordedAt)
+      ? parsedRecordedAt
+      : null;
+    diagnostics.lastPositionSource = options.source;
     await saveTrackingDiagnostics(diagnostics);
   } catch {
     // Silent fail — diagnostics should never break tracking
