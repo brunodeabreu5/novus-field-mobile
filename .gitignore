@@ -1,18 +1,13 @@
 # Dependencies
 node_modules/
 
-# Environment (nunca commitar credenciais)
+# Environment (never commit credentials)
 .env
 .env.*
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
 !.env.example
 
 # Expo
 .expo/
-dist/
 web-build/
 expo-env.d.ts
 
@@ -20,7 +15,7 @@ expo-env.d.ts
 .metro-health-check*
 metro-cache/
 
-# Native builds
+# Native builds — Android
 android/
 android/app/build/
 android/build/
@@ -28,13 +23,13 @@ android/.gradle/
 android/local.properties
 android/captures/
 android/.cxx/
+
+# Native builds — iOS
 ios/Pods/
 ios/build/
 ios/**/build/
-*.xcworkspace
-!default.xcworkspace
 
-# Logs e caches
+# Logs & caches
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -42,7 +37,7 @@ yarn-error.log*
 .cache/
 *.tsbuildinfo
 
-# IDE / Editor
+# IDE
 .idea/
 .vscode/
 *.swp
@@ -53,15 +48,12 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# TypeScript
-*.tsbuildinfo
-
-# Testes
+# Tests
 coverage/
 .nyc_output/
 *.lcov
 
-# Certificados e chaves (segurança)
+# Certificates & keys (security)
 *.jks
 *.keystore
 *.p8
@@ -88,7 +80,10 @@ coverage/
 *.bak
 *.rej
 
-# Outros artefatos
+# Built binaries
 *.ipa
 *.apk
 *.aab
+
+# Bun
+bun.lockb
